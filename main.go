@@ -44,6 +44,8 @@ var (
 	drawBGLayerPNGs          bool
 	drawEG1                  bool
 	drawEG2                  bool
+	drawSpriteHitboxes       bool
+	oopsAll                  int // sprite ID (0-255 valid), -1 = no replacement
 	useGammaRamp             bool
 	drawBG1p0                bool
 	drawBG1p1                bool
@@ -206,6 +208,8 @@ func main() {
 	flag.BoolVar(&drawEG1, "eg1", false, "create eg1.png")
 	flag.BoolVar(&drawEG2, "eg2", false, "create eg2.png")
 	flag.BoolVar(&drawOverlays, "overlay", false, "draw reachable overlays on eg1/eg2")
+	flag.BoolVar(&drawSpriteHitboxes, "hitboxes", false, "draw sprite hitboxes on eg1/eg2")
+	flag.IntVar(&oopsAll, "oopsall", -1, "replace all sprites with this ID")
 	flag.BoolVar(&useGammaRamp, "gamma", false, "use bsnes gamma ramp")
 	flag.BoolVar(&supertileGifs, "gifs", false, "render room GIFs")
 	flag.BoolVar(&animateRoomDrawing, "animate", false, "render animated room drawing GIFs")

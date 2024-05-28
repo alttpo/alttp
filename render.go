@@ -438,6 +438,63 @@ func (room *RoomState) DrawSupertile() {
 	//	)
 	//}
 
+	if drawSpriteHitboxes {
+		// reset WRAM to initial supertile load:
+		room.WRAM = room.WRAMAfterLoaded
+
+		// place Link at the entrypoint:
+		if false {
+			linkX, linkY := room.EntryPoints[0].Point.ToAbsCoord(room.Supertile)
+			// nudge link within visible bounds:
+			if linkX&0x1FF < 0x20 {
+				linkX += 0x20
+			}
+			if linkX&0x1FF > 0x1E0 {
+				linkX -= 0x20
+			}
+			if linkY&0x1FF < 0x20 {
+				linkY += 0x20
+			}
+			if linkY&0x1FF > 0x1E0 {
+				linkY -= 0x20
+			}
+			linkY += 14
+			write16(wram, 0x22, linkX)
+			write16(wram, 0x20, linkY)
+		}
+
+		if oopsAll >= 0 {
+			// replace all enemy sprites with this sprite ID:
+			for i := 0; i < 16; i++ {
+				// dead?
+				if room.WRAM[0x0DD0+i] == 0 {
+					continue
+				}
+
+				et := &room.WRAM[0x0E20+i]
+
+				// ignore switches:
+				if *et == 0x04 || *et == 0x05 || *et == 0x06 || *et == 0x07 || *et == 0x1E || *et == 0x21 {
+					continue
+				}
+
+				// replace sprite ID:
+				*et = uint8(oopsAll)
+			}
+		}
+
+		for i := 0; i < 2; i++ {
+			if err := room.e.ExecAtUntil(b00RunSingleFramePC, 0, 0x200000); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				break
+			}
+		}
+
+		room.DrawSpriteHitboxes(g)
+
+		room.WRAM = room.WRAMAfterLoaded
+	}
+
 	// store full underworld rendering for inclusion into EG map:
 	room.Rendered = g
 
@@ -519,6 +576,200 @@ func (room *RoomState) RenderBGLayers() (
 	return
 }
 
+func drawCircle(img draw.Image, x0, y0, r int, c color.Color) {
+	x, y, dx, dy := r-1, 0, 1, 1
+	err := dx - (r * 2)
+
+	for x > y {
+		img.Set(x0+x, y0+y, c)
+		img.Set(x0+y, y0+x, c)
+		img.Set(x0-y, y0+x, c)
+		img.Set(x0-x, y0+y, c)
+		img.Set(x0-x, y0-y, c)
+		img.Set(x0-y, y0-x, c)
+		img.Set(x0+y, y0-x, c)
+		img.Set(x0+x, y0-y, c)
+
+		if err <= 0 {
+			y++
+			err += dy
+			dy += 2
+		}
+		if err > 0 {
+			x--
+			dx += 2
+			err += dx - (r * 2)
+		}
+	}
+}
+
+func newAlphaFilled(bounds image.Rectangle, c color.Alpha) *image.Alpha {
+	a := image.NewAlpha(bounds)
+	for y := 0; y < bounds.Dy(); y++ {
+		for x := 0; x < bounds.Dx(); x++ {
+			a.SetAlpha(x, y, c)
+		}
+	}
+	return a
+}
+
+type filledCircleMask struct {
+	p image.Point
+	r int
+	a color.Alpha
+}
+
+func (c *filledCircleMask) ColorModel() color.Model {
+	return color.AlphaModel
+}
+
+func (c *filledCircleMask) Bounds() image.Rectangle {
+	return image.Rect(c.p.X-c.r, c.p.Y-c.r, c.p.X+c.r, c.p.Y+c.r)
+}
+
+func (c *filledCircleMask) At(x, y int) color.Color {
+	xx, yy, rr := float64(x-c.p.X)+0.5, float64(y-c.p.Y)+0.5, float64(c.r)
+	if xx*xx+yy*yy < rr*rr {
+		return c.a
+	}
+	return color.Alpha{0}
+}
+
+func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
+	wram := (&room.WRAM)[:]
+
+	shapesC := image.NewRGBA(g.Bounds())
+	shapesA := image.NewAlpha(g.Bounds())
+
+	//black := image.NewUniform(color.RGBA{0, 0, 0, 255})
+	yellow := image.NewUniform(color.RGBA{255, 255, 0, 255})
+	red := image.NewUniform(color.RGBA{255, 48, 48, 255})
+	alpha := color.Alpha{60}
+	alphaU := image.NewUniform(alpha)
+
+	// draw sprites:
+	for i := uint32(0); i < 16; i++ {
+		clr := yellow
+
+		// Initial AI state on load:
+		//initialAIState := read8(room.WRAMAfterLoaded[:], 0x0DD0+i)
+		//if initialAIState == 0 {
+		//	// nothing was ever here:
+		//	continue
+		//}
+
+		// determine if in bounds:
+		yl, yh := read8(wram, 0x0D00+i), read8(wram, 0x0D20+i)
+		xl, xh := read8(wram, 0x0D10+i), read8(wram, 0x0D30+i)
+		y := uint16(yl) | uint16(yh)<<8
+		x := uint16(xl) | uint16(xh)<<8
+		if !room.IsAbsInBounds(x, y) {
+			continue
+		}
+
+		// AI state:
+		st := read8(wram, 0x0DD0+i)
+
+		var lx, ly int
+		lx = int(x) & 0x1FF
+		ly = int(y) & 0x1FF
+
+		//fmt.Printf(
+		//	"%02x @ abs(%04x, %04x) -> map(%04x, %04x)\n",
+		//	et,
+		//	x,
+		//	y,
+		//	col,
+		//	row,
+		//)
+
+		if st == 0 {
+			// dead:
+			clr = red
+		}
+
+		//enemy type:
+		et := read8(wram, 0x0E20+i)
+
+		//(&font.Drawer{
+		//	Dst:  g,
+		//	Src:  clr,
+		//	Face: inconsolata.Bold8x16,
+		//	Dot:  fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)},
+		//}).DrawString(fmt.Sprintf("%02x", et))
+
+		// hitbox:
+		hb := uint32(read8(wram, 0x0F60+i) & 0x1F)
+
+		// find hitbox coords:
+		hbX := int(int8(room.e.Bus.Read8(0x06F735 + hb)))
+		hbW := int(int8(room.e.Bus.Read8(0x06F775 + hb)))
+		hbY := int(int8(room.e.Bus.Read8(0x06F795 + hb)))
+		hbH := int(int8(room.e.Bus.Read8(0x06F7D5 + hb)))
+
+		lx = lx + hbX
+		ly = ly + hbY
+
+		switch et {
+		case 0x7E, 0x7F: // fire bar
+			// fill circle:
+			draw.DrawMask(
+				shapesC,
+				shapesC.Bounds(),
+				clr,
+				image.Point{},
+				&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
+				image.Point{},
+				draw.Over,
+			)
+			draw.DrawMask(
+				shapesA,
+				shapesA.Bounds(),
+				alphaU,
+				image.Point{},
+				&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
+				image.Point{},
+				draw.Over,
+			)
+
+			// outline circle:
+			//drawCircle(shapesC, lx+hbW/2, ly+hbH/2, 16*5-12, clr)
+			//drawCircle(shapesA, lx+hbW/2, ly+hbH/2, 16*5-12, alpha)
+			//draw.Draw(
+			//	shapesC,
+			//	image.Rect(lx, ly, lx+hbW+1, ly+hbH+1),
+			//	alpha,
+			//	image.Point{},
+			//	draw.Over,
+			//)
+			break
+		default:
+			if true {
+				// fill:
+				draw.Draw(shapesC, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), clr, image.Point{}, draw.Over)
+				draw.Draw(shapesA, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), alphaU, image.Point{}, draw.Over)
+			} else {
+				// outline:
+				//draw.Draw(shapesC, image.Rect(lx, ly, lx+hbW, ly+1), alphaU, image.Point{}, draw.Over)
+				//draw.Draw(shapesC, image.Rect(lx+hbW, ly, lx+hbW+1, ly+hbH), alphaU, image.Point{}, draw.Over)
+				//draw.Draw(shapesC, image.Rect(lx, ly+hbH, lx+hbW, ly+hbH+1), alphaU, image.Point{}, draw.Over)
+				//draw.Draw(shapesC, image.Rect(lx, ly, lx+1, ly+hbH+1), alphaU, image.Point{}, draw.Over)
+			}
+		}
+	}
+
+	// draw the color masked with alpha onto the src:
+	draw.DrawMask(
+		g,
+		g.Bounds(),
+		shapesC,
+		image.Point{},
+		shapesA,
+		image.Point{},
+		draw.Over,
+	)
+}
+
 func (room *RoomState) RenderSprites(g draw.Image) {
 	wram := (&room.WRAM)[:]
 
@@ -548,8 +799,6 @@ func (room *RoomState) RenderSprites(g draw.Image) {
 
 		// AI state:
 		st := read8(wram, 0x0DD0+i)
-		// enemy type:
-		et := read8(wram, 0x0E20+i)
 
 		var lx, ly int
 		if true {
@@ -576,6 +825,8 @@ func (room *RoomState) RenderSprites(g draw.Image) {
 			clr = red
 		}
 
+		//enemy type:
+		et := read8(wram, 0x0E20+i)
 		(&font.Drawer{
 			Dst:  g,
 			Src:  clr,
