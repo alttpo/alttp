@@ -465,6 +465,7 @@ func (room *RoomState) DrawSupertile() {
 
 		if oopsAll >= 0 {
 			// replace all enemy sprites with this sprite ID:
+		sprLoop:
 			for i := 0; i < 16; i++ {
 				// dead?
 				if room.WRAM[0x0DD0+i] == 0 {
@@ -473,9 +474,13 @@ func (room *RoomState) DrawSupertile() {
 
 				et := &room.WRAM[0x0E20+i]
 
-				// ignore switches:
-				if *et == 0x04 || *et == 0x05 || *et == 0x06 || *et == 0x07 || *et == 0x1E || *et == 0x21 {
-					continue
+				// exclude specific sprite IDs:
+				for _, id := range excludeSprites {
+					// ignore switches
+					// -excludesprites=04,05,06,07,1E,21
+					if *et == id {
+						continue sprLoop
+					}
 				}
 
 				// replace sprite ID:

@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -46,6 +47,7 @@ var (
 	drawEG2                  bool
 	drawSpriteHitboxes       bool
 	oopsAll                  int // sprite ID (0-255 valid), -1 = no replacement
+	excludeSprites           []uint8
 	useGammaRamp             bool
 	drawBG1p0                bool
 	drawBG1p1                bool
@@ -196,6 +198,7 @@ var fastRomBank uint32 = 0
 
 func main() {
 	entranceMinStr, entranceMaxStr := "", ""
+	oopsAllStr, excludeSpritesStr := "", ""
 	flag.BoolVar(&optimizeGIFs, "optimize", true, "optimize GIFs for size with delta frames")
 	flag.BoolVar(&outputEntranceSupertiles, "entrancemap", false, "dump entrance-supertile map to stdout")
 	flag.BoolVar(&drawRoomPNGs, "roompngs", false, "create individual room PNGs")
@@ -209,7 +212,8 @@ func main() {
 	flag.BoolVar(&drawEG2, "eg2", false, "create eg2.png")
 	flag.BoolVar(&drawOverlays, "overlay", false, "draw reachable overlays on eg1/eg2")
 	flag.BoolVar(&drawSpriteHitboxes, "hitboxes", false, "draw sprite hitboxes on eg1/eg2")
-	flag.IntVar(&oopsAll, "oopsall", -1, "replace all sprites with this ID")
+	flag.StringVar(&oopsAllStr, "oopsall", "", "replace all sprites with this ID (hex)")
+	flag.StringVar(&excludeSpritesStr, "excludesprites", "", "exclude sprite IDs (comma delimited list of hex values) from -oopsall replacement")
 	flag.BoolVar(&useGammaRamp, "gamma", false, "use bsnes gamma ramp")
 	flag.BoolVar(&supertileGifs, "gifs", false, "render room GIFs")
 	flag.BoolVar(&animateRoomDrawing, "animate", false, "render animated room drawing GIFs")
@@ -219,6 +223,142 @@ func main() {
 	flag.StringVar(&entranceMaxStr, "entmax", "84", "entrance ID range maximum (hex)")
 	flag.BoolVar(&staticEntranceMap, "static", false, "use static entrance->supertile map from JP 1.0")
 	flag.Parse()
+
+	excludeSprites = []uint8{
+		0x04,
+		0x05,
+		0x06,
+		0x07,
+		0x09,
+		0x14,
+		0x16,
+		0x1A,
+		0x1D,
+		0x1E,
+		0x1F,
+		0x21,
+		0x25,
+		0x28,
+		0x29,
+		0x2A,
+		0x2B,
+		0x2C,
+		0x2D,
+		0x2E,
+		0x2F,
+		0x30,
+		0x31,
+		0x32,
+		0x33,
+		0x34,
+		0x35,
+		0x36,
+		0x37,
+		0x39,
+		0x3A,
+		0x3B,
+		0x3C,
+		0x3D,
+		0x3E,
+		0x3F,
+		0x40,
+		0x52,
+		0x53,
+		0x54,
+		0x62,
+		0x6C,
+		0x72,
+		0x73,
+		0x74,
+		0x75,
+		0x76,
+		0x78,
+		0x7A,
+		0x7B,
+		0x88,
+		0x89,
+		0x8C,
+		0x8D,
+		0xA2,
+		0xA3,
+		0xA4,
+		0xAB,
+		0xAC,
+		0xAD,
+		0xAE,
+		0xAF,
+		0xB0,
+		0xB1,
+		0xB2,
+		0xB3,
+		0xB4,
+		0xB5,
+		0xB6,
+		0xB7,
+		0xB8,
+		0xB9,
+		0xBA,
+		0xBB,
+		0xBC,
+		0xBD,
+		0xBE,
+		0xBF,
+		0xC0,
+		0xC1,
+		0xC2,
+		0xC8,
+		0xCB,
+		0xCC,
+		0xCD,
+		0xCE,
+		0xD5,
+		0xD6,
+		0xD7,
+		0xD8,
+		0xD9,
+		0xDA,
+		0xDB,
+		0xDC,
+		0xDD,
+		0xDE,
+		0xDF,
+		0xE0,
+		0xE1,
+		0xE2,
+		0xE4,
+		0xE5,
+		0xE6,
+		0xE7,
+		0xE8, // ??
+		0xE9,
+		0xEA,
+		0xEB,
+		0xEC,
+		0xED,
+		0xEE,
+		0xF2,
+	}
+
+	oopsAll = -1
+	if oopsAllStr != "" {
+		if id, err := strconv.ParseInt(oopsAllStr, 16, 8); err == nil {
+			oopsAll = int(id)
+		}
+	}
+
+	// parse exclusion list:
+	if excludeSpritesStr != "" {
+		strs := strings.Split(excludeSpritesStr, ",")
+		list := make([]string, 0, 10)
+		for _, s := range strs {
+			// parse hex values:
+			if id, err := strconv.ParseInt(s, 16, 64); err == nil {
+				excludeSprites = append(excludeSprites, uint8(id))
+				list = append(list, strconv.FormatInt(id, 16))
+			}
+		}
+		fmt.Printf("excluding sprite ids: [%s]", strings.Join(list, ","))
+	}
 
 	var err error
 
