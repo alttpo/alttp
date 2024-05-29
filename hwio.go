@@ -116,6 +116,9 @@ type HWIO struct {
 
 	// mapped to $5000-$7FFF
 	Dyn [0x3000]byte
+
+	mpya uint16
+	mpyb uint16
 }
 
 func (h *HWIO) Reset() {
@@ -135,6 +138,15 @@ func (h *HWIO) Read(address uint32) (value byte) {
 		return
 	}
 
+	if offs == 0x4216 {
+		value = uint8((h.mpya * h.mpyb) & 0xFF)
+		return
+	}
+	if offs == 0x4217 {
+		value = uint8((h.mpya * h.mpyb) >> 8)
+		return
+	}
+
 	//if h.s.Logger != nil {
 	//	fmt.Fprintf(h.s.Logger, "hwio[$%04x] -> $%02x\n", offs, value)
 	//}
@@ -146,6 +158,15 @@ func (h *HWIO) Write(address uint32, value byte) {
 
 	if offs == 0x4200 {
 		// NMITIMEN
+		return
+	}
+
+	if offs == 0x4202 {
+		h.mpya = uint16(value)
+		return
+	}
+	if offs == 0x4203 {
+		h.mpyb = uint16(value)
 		return
 	}
 
