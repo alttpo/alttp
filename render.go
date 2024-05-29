@@ -16,7 +16,7 @@ import (
 	"unsafe"
 )
 
-func renderAll(fname string, entranceGroups []Entrance, rowStart int, rowCount int) {
+func renderAll(fname string, rooms []*RoomState, rowStart int, rowCount int) {
 	var err error
 
 	const divider = 1
@@ -42,142 +42,139 @@ func renderAll(fname string, entranceGroups []Entrance, rowStart int, rowCount i
 	yellow := image.NewUniform(color.RGBA{255, 255, 0, 255})
 	white := image.NewUniform(color.RGBA{255, 255, 255, 255})
 
-	for i := range entranceGroups {
-		g := &entranceGroups[i]
-		for _, room := range g.Rooms {
-			st := int(room.Supertile)
+	for _, room := range rooms {
+		st := int(room.Supertile)
 
-			row := st/0x10 - rowStart
-			col := st % 0x10
-			if row < 0 || row >= rowCount {
-				continue
+		row := st/0x10 - rowStart
+		col := st % 0x10
+		if row < 0 || row >= rowCount {
+			continue
+		}
+
+		wga.Add(1)
+		go func(room *RoomState) {
+			defer wga.Done()
+
+			fmt.Printf("entrance $%02x supertile %s render start\n", room.Entrance.EntranceID, room.Supertile)
+
+			stx := col * supertilepx
+			sty := row * supertilepx
+
+			if room.Rendered != nil {
+				draw.Draw(
+					all,
+					image.Rect(stx, sty, stx+supertilepx, sty+supertilepx),
+					room.Rendered,
+					image.Point{},
+					draw.Src,
+				)
 			}
 
-			wga.Add(1)
-			go func(room *RoomState) {
-				defer wga.Done()
+			// highlight tiles that are reachable:
+			if drawOverlays {
+				maxRange := 0x2000
+				if room.IsDarkRoom() {
+					maxRange = 0x1000
+				}
 
-				fmt.Printf("entrance $%02x supertile %s render start\n", g.EntranceID, room.Supertile)
+				// draw supertile over pits, bombable floors, and warps:
+				for j := range room.ExitPoints {
+					ep := &room.ExitPoints[j]
+					if !ep.WorthMarking {
+						continue
+					}
 
-				stx := col * supertilepx
-				sty := row * supertilepx
+					_, er, ec := ep.Point.RowCol()
+					x := int(ec) << 3
+					y := int(er) << 3
+					fd0 := font.Drawer{
+						Dst:  all,
+						Src:  black,
+						Face: inconsolata.Regular8x16,
+						Dot:  fixed.Point26_6{fixed.I(stx + x + 1), fixed.I(sty + y + 1)},
+					}
+					fd1 := font.Drawer{
+						Dst:  all,
+						Src:  yellow,
+						Face: inconsolata.Regular8x16,
+						Dot:  fixed.Point26_6{fixed.I(stx + x), fixed.I(sty + y)},
+					}
+					stStr := fmt.Sprintf("%02X", uint16(ep.Supertile))
+					fd0.DrawString(stStr)
+					fd1.DrawString(stStr)
+				}
 
-				if room.Rendered != nil {
+				// draw supertile over stairs:
+				for j := range room.Stairs {
+					sn := room.StairExitTo[j]
+					_, er, ec := room.Stairs[j].RowCol()
+
+					x := int(ec) << 3
+					y := int(er) << 3
+					fd0 := font.Drawer{
+						Dst:  all,
+						Src:  black,
+						Face: inconsolata.Regular8x16,
+						Dot:  fixed.Point26_6{fixed.I(stx + 8 + x + 1), fixed.I(sty - 8 + y + 1 + 12)},
+					}
+					fd1 := font.Drawer{
+						Dst:  all,
+						Src:  yellow,
+						Face: inconsolata.Regular8x16,
+						Dot:  fixed.Point26_6{fixed.I(stx + 8 + x), fixed.I(sty - 8 + y + 12)},
+					}
+					stStr := fmt.Sprintf("%02X", uint16(sn))
+					fd0.DrawString(stStr)
+					fd1.DrawString(stStr)
+				}
+
+				for t := 0; t < maxRange; t++ {
+					v := room.Reachable[t]
+					if v == 0x01 {
+						continue
+					}
+
+					tt := MapCoord(t)
+					lyr, tr, tc := tt.RowCol()
+					overlay := greenTint
+					if lyr != 0 {
+						overlay = cyanTint
+					}
+					if v == 0x20 || v == 0x62 {
+						overlay = redTint
+					}
+
+					x := int(tc) << 3
+					y := int(tr) << 3
 					draw.Draw(
 						all,
-						image.Rect(stx, sty, stx+supertilepx, sty+supertilepx),
-						room.Rendered,
+						image.Rect(stx+x, sty+y, stx+x+8, sty+y+8),
+						overlay,
 						image.Point{},
-						draw.Src,
+						draw.Over,
 					)
 				}
 
-				// highlight tiles that are reachable:
-				if drawOverlays {
-					maxRange := 0x2000
-					if room.IsDarkRoom() {
-						maxRange = 0x1000
-					}
+				for t, d := range room.Hookshot {
+					_, tr, tc := t.RowCol()
+					x := int(tc) << 3
+					y := int(tr) << 3
 
-					// draw supertile over pits, bombable floors, and warps:
-					for j := range room.ExitPoints {
-						ep := &room.ExitPoints[j]
-						if !ep.WorthMarking {
-							continue
-						}
+					overlay := blueTint
+					_ = d
 
-						_, er, ec := ep.Point.RowCol()
-						x := int(ec) << 3
-						y := int(er) << 3
-						fd0 := font.Drawer{
-							Dst:  all,
-							Src:  black,
-							Face: inconsolata.Regular8x16,
-							Dot:  fixed.Point26_6{fixed.I(stx + x + 1), fixed.I(sty + y + 1)},
-						}
-						fd1 := font.Drawer{
-							Dst:  all,
-							Src:  yellow,
-							Face: inconsolata.Regular8x16,
-							Dot:  fixed.Point26_6{fixed.I(stx + x), fixed.I(sty + y)},
-						}
-						stStr := fmt.Sprintf("%02X", uint16(ep.Supertile))
-						fd0.DrawString(stStr)
-						fd1.DrawString(stStr)
-					}
-
-					// draw supertile over stairs:
-					for j := range room.Stairs {
-						sn := room.StairExitTo[j]
-						_, er, ec := room.Stairs[j].RowCol()
-
-						x := int(ec) << 3
-						y := int(er) << 3
-						fd0 := font.Drawer{
-							Dst:  all,
-							Src:  black,
-							Face: inconsolata.Regular8x16,
-							Dot:  fixed.Point26_6{fixed.I(stx + 8 + x + 1), fixed.I(sty - 8 + y + 1 + 12)},
-						}
-						fd1 := font.Drawer{
-							Dst:  all,
-							Src:  yellow,
-							Face: inconsolata.Regular8x16,
-							Dot:  fixed.Point26_6{fixed.I(stx + 8 + x), fixed.I(sty - 8 + y + 12)},
-						}
-						stStr := fmt.Sprintf("%02X", uint16(sn))
-						fd0.DrawString(stStr)
-						fd1.DrawString(stStr)
-					}
-
-					for t := 0; t < maxRange; t++ {
-						v := room.Reachable[t]
-						if v == 0x01 {
-							continue
-						}
-
-						tt := MapCoord(t)
-						lyr, tr, tc := tt.RowCol()
-						overlay := greenTint
-						if lyr != 0 {
-							overlay = cyanTint
-						}
-						if v == 0x20 || v == 0x62 {
-							overlay = redTint
-						}
-
-						x := int(tc) << 3
-						y := int(tr) << 3
-						draw.Draw(
-							all,
-							image.Rect(stx+x, sty+y, stx+x+8, sty+y+8),
-							overlay,
-							image.Point{},
-							draw.Over,
-						)
-					}
-
-					for t, d := range room.Hookshot {
-						_, tr, tc := t.RowCol()
-						x := int(tc) << 3
-						y := int(tr) << 3
-
-						overlay := blueTint
-						_ = d
-
-						draw.Draw(
-							all,
-							image.Rect(stx+x, sty+y, stx+x+8, sty+y+8),
-							overlay,
-							image.Point{},
-							draw.Over,
-						)
-					}
+					draw.Draw(
+						all,
+						image.Rect(stx+x, sty+y, stx+x+8, sty+y+8),
+						overlay,
+						image.Point{},
+						draw.Over,
+					)
 				}
+			}
 
-				fmt.Printf("entrance $%02x supertile %s render complete\n", g.EntranceID, room.Supertile)
-			}(room)
-		}
+			fmt.Printf("entrance $%02x supertile %s render complete\n", room.Entrance.EntranceID, room.Supertile)
+		}(room)
 	}
 	wga.Wait()
 
@@ -220,7 +217,7 @@ func renderAll(fname string, entranceGroups []Entrance, rowStart int, rowCount i
 		wga.Wait()
 	}
 
-	if err = exportPNG(fmt.Sprintf("data/%s.png", fname), all); err != nil {
+	if err = exportPNG(fmt.Sprintf("%s.png", fname), all); err != nil {
 		panic(err)
 	}
 }
@@ -342,6 +339,10 @@ func generateDeltaFrame(prev, curr *image.Paletted) (delta *image.Paletted, dirt
 	}
 
 	return
+}
+
+func renderSupertile(room *RoomState) {
+	room.DrawSupertile()
 }
 
 func (room *RoomState) DrawSupertile() {
@@ -469,7 +470,7 @@ func (room *RoomState) DrawSupertile() {
 
 		// run a few frames:
 		for i := 0; i < 16; i++ {
-			if err := room.e.ExecAtUntil(b00RunSingleFramePC, 0, 0x200000); err != nil {
+			if err := room.e.ExecAtUntil(b00RunSingleFramePC, 0, 0x400000); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				break
 			}
@@ -488,22 +489,22 @@ func (room *RoomState) DrawSupertile() {
 	room.Rendered = g
 
 	if drawRoomPNGs {
-		if err := exportPNG(fmt.Sprintf("data/%03X.png", uint16(room.Supertile)), g); err != nil {
+		if err := exportPNG(fmt.Sprintf("%03X.png", uint16(room.Supertile)), g); err != nil {
 			panic(err)
 		}
 	}
 
 	if drawBGLayerPNGs {
-		if err := exportPNG(fmt.Sprintf("data/%03X.bg1.0.png", uint16(room.Supertile)), bg1p[0]); err != nil {
+		if err := exportPNG(fmt.Sprintf("%03X.bg1.0.png", uint16(room.Supertile)), bg1p[0]); err != nil {
 			panic(err)
 		}
-		if err := exportPNG(fmt.Sprintf("data/%03X.bg1.1.png", uint16(room.Supertile)), bg1p[1]); err != nil {
+		if err := exportPNG(fmt.Sprintf("%03X.bg1.1.png", uint16(room.Supertile)), bg1p[1]); err != nil {
 			panic(err)
 		}
-		if err := exportPNG(fmt.Sprintf("data/%03X.bg2.0.png", uint16(room.Supertile)), bg2p[0]); err != nil {
+		if err := exportPNG(fmt.Sprintf("%03X.bg2.0.png", uint16(room.Supertile)), bg2p[0]); err != nil {
 			panic(err)
 		}
-		if err := exportPNG(fmt.Sprintf("data/%03X.bg2.1.png", uint16(room.Supertile)), bg2p[1]); err != nil {
+		if err := exportPNG(fmt.Sprintf("%03X.bg2.1.png", uint16(room.Supertile)), bg2p[1]); err != nil {
 			panic(err)
 		}
 	}
@@ -515,16 +516,26 @@ func (room *RoomState) RenderBGLayers() (
 	bg2p [2]*image.Paletted,
 	addColor, halfColor bool,
 ) {
-	wram := (&room.WRAM)[:]
+	return renderBGLayers(&room.WRAM, (&room.VRAMTileSet)[:])
+}
+
+func renderBGLayers(wramArray *WRAMArray, tileset []uint8) (
+	pal color.Palette,
+	bg1p [2]*image.Paletted,
+	bg2p [2]*image.Paletted,
+	addColor, halfColor bool,
+) {
+	wram := wramArray[:]
 
 	// assume WRAM has rendering state as well:
-	isDark := room.IsDarkRoom()
+	//isDark := room.IsDarkRoom()
+	isDark := read8(wram, 0xC005) != 0
 
 	// INIDISP contains PPU brightness
 	//brightness := read8(wram, 0x13) & 0xF
 	//_ = brightness
 
-	//ioutil.WriteFile(fmt.Sprintf("data/%03X.vram", st), vram, 0644)
+	//ioutil.WriteFile(fmt.Sprintf("%03X.vram", st), vram, 0644)
 
 	// extract palette:
 	cgram := (*(*[0x100]uint16)(unsafe.Pointer(&wram[0xC300])))[:]
@@ -542,7 +553,6 @@ func (room *RoomState) RenderBGLayers() (
 
 	// render all separate BG1 and BG2 priority layers:
 	{
-		tileset := (&room.VRAMTileSet)[:]
 		bg1wram := (*(*[0x1000]uint16)(unsafe.Pointer(&wram[0x2000])))[:]
 		renderBGsep(bg1p, bg1wram, tileset, drawBG1p0, drawBG1p1)
 		if !isDark {
@@ -555,14 +565,94 @@ func (room *RoomState) RenderBGLayers() (
 	n0414 := read8(wram, 0x0414)
 	addColor = n0414 == 0x07
 	halfColor = n0414 == 0x04
-	//flip := n0414 == 0x03
+	flip := n0414 == 0x03
 
 	// swap bg1 and bg2 if color math is involved:
-	if !addColor && !halfColor {
+	if !addColor && !halfColor && !flip {
 		bg1p, bg2p = bg2p, bg1p
 	}
 
 	return
+}
+
+func renderOWBGLayers(wramArray *WRAMArray, bg1tilemap []uint16, bg2tilemap []uint16, tileset []byte) (
+	pal color.Palette,
+	bg1p [2]*image.Paletted,
+	bg2p [2]*image.Paletted,
+	addColor, halfColor bool,
+) {
+	wram := wramArray[:]
+
+	// assume WRAM has rendering state as well:
+	//isDark := room.IsDarkRoom()
+	//isDark := read8(wram, 0xC005) != 0
+
+	// INIDISP contains PPU brightness
+	//brightness := read8(wram, 0x13) & 0xF
+	//_ = brightness
+
+	//ioutil.WriteFile(fmt.Sprintf("%03X.vram", st), vram, 0644)
+
+	// extract palette:
+	cgram := (*(*[0x100]uint16)(unsafe.Pointer(&wram[0xC300])))[:]
+	pal = cgramToPalette(cgram)
+
+	// render BG layers:
+	bg1p = [2]*image.Paletted{
+		image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+		image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+	}
+	bg2p = [2]*image.Paletted{
+		image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+		image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+	}
+
+	// render all separate BG1 and BG2 priority layers:
+	renderVRAMBG(bg1p, bg1tilemap, tileset, drawBG1p0, drawBG1p1)
+	renderVRAMBG(bg2p, bg2tilemap, tileset, drawBG2p0, drawBG2p1)
+
+	//subdes := read8(wram, 0x1D)
+	n0414 := read8(wram, 0x0414)
+	addColor = n0414 == 0x07
+	halfColor = n0414 == 0x04
+	flip := n0414 == 0x03
+
+	// swap bg1 and bg2 if color math is involved:
+	if !addColor && !halfColor && !flip {
+		bg1p, bg2p = bg2p, bg1p
+	}
+
+	return
+}
+
+func drawShadowedString(g draw.Image, clr image.Image, dot fixed.Point26_6, s string) {
+	// shadow:
+	for oy := -1; oy <= 1; oy++ {
+		for ox := -1; ox <= 1; ox++ {
+			(&font.Drawer{
+				Dst:  g,
+				Src:  image.Black,
+				Face: inconsolata.Bold8x16,
+				Dot:  fixed.Point26_6{X: dot.X + fixed.I(ox), Y: dot.Y + fixed.I(oy)},
+			}).DrawString(s)
+		}
+	}
+
+	// regular label:
+	(&font.Drawer{
+		Dst:  g,
+		Src:  clr,
+		Face: inconsolata.Bold8x16,
+		Dot:  dot,
+	}).DrawString(s)
+}
+
+func drawOutlineBox(g draw.Image, clr image.Image, x, y int, w, h int) {
+	// outline box:
+	draw.Draw(g, image.Rect(x, y, x+w, y+1), clr, image.Point{}, draw.Over)
+	draw.Draw(g, image.Rect(x+w, y, x+w+1, y+h), clr, image.Point{}, draw.Over)
+	draw.Draw(g, image.Rect(x, y+h, x+w, y+h+1), clr, image.Point{}, draw.Over)
+	draw.Draw(g, image.Rect(x, y, x+1, y+h), clr, image.Point{}, draw.Over)
 }
 
 func drawCircle(img draw.Image, x0, y0, r int, c color.Color) {
@@ -701,14 +791,6 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 				// set data bank:
 				e.CPU.RDBR = 0x06
 
-				e.OnPC = make(map[uint32]func())
-				e.OnPC[0x1ED185|fastRomBank] = func() {
-					fmt.Println("next_segment")
-				}
-				e.OnPC[0x06F425|fastRomBank] = func() {
-					fmt.Println("_06F425")
-				}
-
 				// clear i-frames and invuln:
 				e.WRAM[0x031F] = 0
 				e.WRAM[0x037B] = 0
@@ -718,6 +800,7 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 					e.WRAM[0x0800+(j<<2)+1] = 0xF0
 					e.WRAM[0x0800+(j<<2)+2] = 0
 					e.WRAM[0x0800+(j<<2)+3] = 0
+					e.WRAM[0x0A20+j] = 0
 				}
 
 				// find quadrant top-left x,y:
@@ -898,6 +981,9 @@ func (room *RoomState) RenderSprites(g draw.Image) {
 		// AI state:
 		st := read8(wram, 0x0DD0+i)
 
+		// enemy type:
+		et := read8(wram, 0x0E20+i)
+
 		var lx, ly int
 		if true {
 			lx = int(x) & 0x1FF
@@ -918,27 +1004,17 @@ func (room *RoomState) RenderSprites(g draw.Image) {
 		//	row,
 		//)
 
+		hb := hitbox[read8(wram, 0x0F60+i)&0x1F]
+
 		if st == 0 {
 			// dead:
 			clr = red
 		}
 
-		//enemy type:
-		et := read8(wram, 0x0E20+i)
-		(&font.Drawer{
-			Dst:  g,
-			Src:  clr,
-			Face: inconsolata.Bold8x16,
-			Dot:  fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)},
-		}).DrawString(fmt.Sprintf("%02x", et))
+		drawOutlineBox(g, clr, lx+hb.X, ly+hb.Y, hb.W, hb.H)
 
-		if st == 0 {
-			// outline box:
-			draw.Draw(g, image.Rect(lx, ly, lx+16, ly+1), clr, image.Point{}, draw.Over)
-			draw.Draw(g, image.Rect(lx+16, ly, lx+16+1, ly+16), clr, image.Point{}, draw.Over)
-			draw.Draw(g, image.Rect(lx, ly+16, lx+16, ly+16+1), clr, image.Point{}, draw.Over)
-			draw.Draw(g, image.Rect(lx, ly, lx+1, ly+16), clr, image.Point{}, draw.Over)
-		}
+		// colored number label:
+		drawShadowedString(g, clr, fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)}, fmt.Sprintf("%02X", et))
 	}
 
 	// draw Link:
@@ -957,12 +1033,8 @@ func (room *RoomState) RenderSprites(g draw.Image) {
 		}
 
 		green := image.NewUniform(color.RGBA{0, 255, 0, 255})
-		(&font.Drawer{
-			Dst:  g,
-			Src:  green,
-			Face: inconsolata.Bold8x16,
-			Dot:  fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)},
-		}).DrawString("LK")
+		drawOutlineBox(g, green, lx, ly, 16, 16)
+		drawShadowedString(g, green, fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)}, "LK")
 	}
 }
 
@@ -998,6 +1070,8 @@ func ComposeToNonPaletted(
 	addColor bool,
 	halfColor bool,
 ) {
+	mx := dst.Bounds().Min.X
+	my := dst.Bounds().Min.Y
 	if halfColor {
 		// color math: add half
 		for y := 0; y < 512; y++ {
@@ -1013,9 +1087,9 @@ func ComposeToNonPaletted(
 						B: sat(b1>>1 + b2>>1),
 						A: 0xffff,
 					}
-					dst.Set(x, y, c)
+					dst.Set(mx+x, my+y, c)
 				} else {
-					dst.Set(x, y, pal[bg1c])
+					dst.Set(mx+x, my+y, pal[bg1c])
 				}
 			}
 		}
@@ -1033,7 +1107,7 @@ func ComposeToNonPaletted(
 					B: sat(b1 + b2),
 					A: 0xffff,
 				}
-				dst.Set(x, y, c)
+				dst.Set(mx+x, my+y, c)
 			}
 		}
 	} else {
@@ -1045,7 +1119,7 @@ func ComposeToNonPaletted(
 				c2 := bg2p[0].ColorIndexAt(x, y)
 				c3 := bg2p[1].ColorIndexAt(x, y)
 				c := pick(pick(c0, c1), pick(c2, c3))
-				dst.Set(x, y, pal[c])
+				dst.Set(mx+x, my+y, pal[c])
 			}
 		}
 	}
@@ -1214,7 +1288,7 @@ func renderBG(g *image.Paletted, bg []uint16, tiles []uint8, prio uint8) {
 				continue
 			}
 
-			draw4bppTile(g, z, tiles, tx, ty)
+			draw4bppBGTile(g, z, tiles, tx, ty)
 		}
 	}
 }
@@ -1234,12 +1308,33 @@ func renderBGsep(g [2]*image.Paletted, bg []uint16, tiles []uint8, p0 bool, p1 b
 			if p == 1 && !p1 {
 				continue
 			}
-			draw4bppTile(g[p], z, tiles, tx, ty)
+			draw4bppBGTile(g[p], z, tiles, tx, ty)
 		}
 	}
 }
 
-func draw4bppTile(g *image.Paletted, z uint16, tiles []uint8, tx int, ty int) {
+func renderVRAMBG(g [2]*image.Paletted, bg []uint16, tiles []uint8, p0 bool, p1 bool) {
+	for ty := 0; ty < 64; ty++ {
+		for tx := 0; tx < 64; tx++ {
+			a := uint32(ty&31)*32 + uint32(tx&31)
+			a += (uint32(tx) & 0x20) << 5
+			a += (uint32(ty) & 0x20) << 6
+			z := bg[a]
+
+			// priority check:
+			p := (z & 0x2000) >> 13
+			if p == 0 && !p0 {
+				continue
+			}
+			if p == 1 && !p1 {
+				continue
+			}
+			draw4bppBGTile(g[p], z, tiles, tx, ty)
+		}
+	}
+}
+
+func draw4bppBGTile(g *image.Paletted, z uint16, tiles []uint8, tx int, ty int) {
 	//High     Low          Legend->  c: Starting character (tile) number
 	//vhopppcc cccccccc               h: horizontal flip  v: vertical flip
 	//                                p: palette number   o: priority bit

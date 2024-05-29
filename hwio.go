@@ -35,6 +35,9 @@ func (c *DMAChannel) Transfer(regs *DMARegs, ch int, h *HWIO) {
 		panic("PPU -> CPU DMA transfer not supported!")
 	} else {
 		// CPU -> PPU
+		if h.s.Logger != nil {
+			fmt.Fprintf(h.s.Logger, "dma: a=%06X, b=%04x, s=%04x; vaddr=%04x\n", aSrc, bDestAddr, siz, h.PPU.addr)
+		}
 	copyloop:
 		for {
 			switch mode {
@@ -112,13 +115,26 @@ type HWIO struct {
 		incrAmt       uint16 // 1, 32, or 128
 		addrRemapping byte
 		addr          uint16
+
+		oamadd                 uint16
+		ObjTilemapAddress      uint32
+		ObjNamespaceSeparation uint32
 	}
+
+	APU struct {
+		mpya uint8  // multiplicand A
+		mpyb uint8  // multiplicand B
+		mpyp uint16 // product
+
+		divd uint16 // dividend
+		divi uint8  // divisor
+		divq uint16 // quotient
+	}
+
+	ControllerInput [2]uint16
 
 	// mapped to $5000-$7FFF
 	Dyn [0x3000]byte
-
-	mpya uint16
-	mpyb uint16
 }
 
 func (h *HWIO) Reset() {
@@ -138,12 +154,39 @@ func (h *HWIO) Read(address uint32) (value byte) {
 		return
 	}
 
+	if offs == 0x4214 {
+		// RDDIVL
+		value = uint8(h.APU.divq & 0xFF)
+		return
+	}
+	if offs == 0x4215 {
+		// RDDIVH
+		value = uint8(h.APU.divq >> 8)
+		return
+	}
+
 	if offs == 0x4216 {
-		value = uint8((h.mpya * h.mpyb) & 0xFF)
+		// RDMPYL
+		value = uint8(h.APU.mpyp & 0xFF)
 		return
 	}
 	if offs == 0x4217 {
-		value = uint8((h.mpya * h.mpyb) >> 8)
+		// RDMPYH
+		value = uint8(h.APU.mpyp >> 8)
+		return
+	}
+
+	if offs == 0x4218 {
+		value = byte(h.ControllerInput[0] & 0xFF)
+		return
+	}
+	if offs == 0x4219 {
+		value = byte(h.ControllerInput[0] >> 8)
+		return
+	}
+	// OPVCT
+	if offs == 0x213D {
+		value = 0xF0
 		return
 	}
 
@@ -162,11 +205,39 @@ func (h *HWIO) Write(address uint32, value byte) {
 	}
 
 	if offs == 0x4202 {
-		h.mpya = uint16(value)
+		// WRMPYA
+		h.APU.mpya = value
+		h.APU.mpyp = uint16(h.APU.mpya) * uint16(h.APU.mpyb)
 		return
 	}
 	if offs == 0x4203 {
-		h.mpyb = uint16(value)
+		// WRMPYB
+		h.APU.mpyb = value
+		h.APU.mpyp = uint16(h.APU.mpya) * uint16(h.APU.mpyb)
+		return
+	}
+	if offs == 0x4204 {
+		// WRDIVL
+		h.APU.divd = h.APU.divd&0xFF00 | uint16(value)
+		if h.APU.divi != 0 {
+			h.APU.divq = h.APU.divd / uint16(h.APU.divi)
+		}
+		return
+	}
+	if offs == 0x4205 {
+		// WRDIVH
+		h.APU.divd = h.APU.divd&0x00FF | uint16(value)<<8
+		if h.APU.divi != 0 {
+			h.APU.divq = h.APU.divd / uint16(h.APU.divi)
+		}
+		return
+	}
+	if offs == 0x4206 {
+		// WRDIVB
+		h.APU.divi = value
+		if h.APU.divi != 0 {
+			h.APU.divq = h.APU.divd / uint16(h.APU.divi)
+		}
 		return
 	}
 
@@ -216,12 +287,32 @@ func (h *HWIO) Write(address uint32, value byte) {
 		// INIDISP
 		return
 	}
-	if offs == 0x2102 || offs == 0x2103 {
-		// OAMADD
+	if offs == 0x2101 {
+		// OBSEL
+		h.PPU.ObjNamespaceSeparation = uint32(value&0x18) << 9
+		h.PPU.ObjTilemapAddress = uint32(value&0x7) << 13
+		// skip size table
+		return
+	}
+	if offs == 0x2102 {
+		// OAMADDL
+		h.PPU.oamadd = uint16(value) | h.PPU.oamadd&0xFF00
+		return
+	}
+	if offs == 0x2103 {
+		// OAMADDH
+		h.PPU.oamadd = uint16(value)<<8 | h.PPU.oamadd&0x00FF
 		return
 	}
 	if offs == 0x2104 {
 		// OAMDATA
+		h.s.OAM[h.PPU.oamadd] = value
+
+		// TODO: how to wrap this?
+		h.PPU.oamadd = h.PPU.oamadd + 1
+		if h.PPU.oamadd >= 544 {
+			h.PPU.oamadd = 0
+		}
 		return
 	}
 	if offs == 0x2121 {

@@ -8,14 +8,20 @@ import (
 	"github.com/alttpo/snes"
 	"github.com/alttpo/snes/asm"
 	"github.com/alttpo/snes/mapping/lorom"
+	"golang.org/x/image/draw"
+	"golang.org/x/image/math/fixed"
 	"image"
-	"io/ioutil"
+	"image/color"
+	"image/gif"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
 )
+
+const hackhackhack = false
 
 var (
 	b02LoadUnderworldSupertilePC     uint32 = 0x02_5200
@@ -23,10 +29,16 @@ var (
 	b01LoadAndDrawRoomSetSupertilePC uint32
 	b00HandleRoomTagsPC              uint32 = 0x00_5300
 	b00RunSingleFramePC              uint32 = 0x00_5400
-	loadEntrancePC                   uint32
-	setEntranceIDPC                  uint32
-	loadSupertilePC                  uint32
-	donePC                           uint32
+
+	loadExitPC         uint32
+	setExitSupertilePC uint32
+	loadOverworldPC    uint32
+	loadEntrancePC     uint32
+	setEntranceIDPC    uint32
+	loadSupertilePC    uint32
+	runFramePC         uint32
+	nmiRoutinePC       uint32
+	donePC             uint32
 )
 
 var (
@@ -57,146 +69,18 @@ var (
 	staticEntranceMap        bool
 )
 
-// entranceSupertiles is generated from `mapgen -entrancemap`
-var entranceSupertiles = map[uint8][]uint16{
-	0x0:  []uint16{},
-	0x1:  []uint16{0x104},
-	0x2:  []uint16{0x12},
-	0x3:  []uint16{0x60, 0x50, 0x1, 0x72, 0x82, 0x81, 0x71, 0x70},
-	0x4:  []uint16{0x61},
-	0x5:  []uint16{0x62, 0x52},
-	0x6:  []uint16{0xf0},
-	0x7:  []uint16{0xf1},
-	0x8:  []uint16{0xc9, 0xb9, 0xa9, 0xaa, 0xa8, 0xba, 0xb8, 0x99, 0xda, 0xd9, 0xd8, 0xc8, 0x89},
-	0x9:  []uint16{0x84, 0x74, 0x75},
-	0xa:  []uint16{0x85},
-	0xb:  []uint16{0x83, 0x73},
-	0xc:  []uint16{0x63, 0x53, 0x43, 0x33},
-	0xd:  []uint16{0xf2},
-	0xe:  []uint16{0xf3},
-	0xf:  []uint16{0xf4, 0xf5},
-	0x10: []uint16{},
-	0x11: []uint16{},
-	0x12: []uint16{},
-	0x13: []uint16{0xf8, 0xe8},
-	0x14: []uint16{},
-	0x15: []uint16{0x23},
-	0x16: []uint16{0xfb},
-	0x17: []uint16{0xeb},
-	0x18: []uint16{0xd5, 0xc5, 0xc4, 0xb4, 0xa4, 0xb5, 0x4},
-	0x19: []uint16{0x24, 0x14, 0x13},
-	0x1a: []uint16{0xfd},
-	0x1b: []uint16{0xed},
-	0x1c: []uint16{0xfe},
-	0x1d: []uint16{0xee},
-	0x1e: []uint16{0xff},
-	0x1f: []uint16{0xef},
-	0x20: []uint16{0xdf},
-	0x21: []uint16{0xf9},
-	0x22: []uint16{0xfa},
-	0x23: []uint16{0xea},
-	0x24: []uint16{0xe0, 0xd0, 0xc0, 0xb0, 0x40, 0x20},
-	0x25: []uint16{0x28, 0x38, 0x37, 0x36, 0x26, 0x76, 0x66, 0x16, 0x6, 0x35, 0x34, 0x54, 0x46},
-	0x26: []uint16{0x4a, 0x9, 0x3a, 0xa, 0x4b, 0x3b, 0x2b, 0x2a, 0x1a, 0x6a, 0x5a, 0x19, 0x1b, 0xb},
-	0x27: []uint16{0x98, 0xd2, 0xc2, 0xc1, 0xb1, 0xb2, 0xa2, 0x93, 0x92, 0x91, 0xa0, 0x90, 0xb3, 0xa3, 0xa1, 0xc3, 0xd1, 0x97},
-	0x28: []uint16{},
-	0x29: []uint16{0x57},
-	0x2a: []uint16{},
-	0x2b: []uint16{0x59, 0x49, 0x39, 0x29},
-	0x2c: []uint16{},
-	0x2d: []uint16{0xe, 0x1e, 0x3e, 0x4e, 0x6e, 0x5e, 0x7e, 0x9e, 0xbe, 0xce, 0xbf, 0x4f, 0x9f, 0xaf, 0xae, 0x8e, 0x7f, 0x5f, 0x3f, 0x1f, 0x2e},
-	0x2e: []uint16{0xe6},
-	0x2f: []uint16{0xe7},
-	0x30: []uint16{0xe4},
-	0x31: []uint16{0xe5},
-	0x32: []uint16{},
-	0x33: []uint16{0x77, 0x31, 0x27, 0x17, 0xa7, 0x7, 0x87},
-	0x34: []uint16{0xdb, 0xcb, 0xcc, 0xbc, 0xac, 0xbb, 0xab, 0x64, 0x65, 0x45, 0x44, 0xdc},
-	0x35: []uint16{0xd6, 0xc6, 0xb6, 0x15, 0xc7, 0xb7},
-	0x36: []uint16{0x10},
-	0x37: []uint16{0xc, 0x8c, 0x1c, 0x8b, 0x7b, 0x9b, 0x7d, 0x7c, 0x9c, 0x9d, 0x8d, 0x6b, 0x5b, 0x5c, 0x5d, 0x6d, 0x6c, 0xa5, 0x95, 0x96, 0x3d, 0x4d, 0xa6, 0x4c, 0x1d, 0xd},
-	0x38: []uint16{0x8},
-	0x39: []uint16{},
-	0x3a: []uint16{0x3c},
-	0x3b: []uint16{0x2c},
-	0x3c: []uint16{0x100},
-	0x3d: []uint16{},
-	0x3e: []uint16{0x101},
-	0x3f: []uint16{},
-	0x40: []uint16{0x102},
-	0x41: []uint16{0x117},
-	0x42: []uint16{},
-	0x43: []uint16{},
-	0x44: []uint16{0x103},
-	0x45: []uint16{0x105},
-	0x46: []uint16{0x11f},
-	0x47: []uint16{0x106},
-	0x48: []uint16{},
-	0x49: []uint16{},
-	0x4a: []uint16{0x107},
-	0x4b: []uint16{0x108},
-	0x4c: []uint16{0x109},
-	0x4d: []uint16{0x10a},
-	0x4e: []uint16{0x10b},
-	0x4f: []uint16{},
-	0x50: []uint16{0x10c},
-	0x51: []uint16{},
-	0x52: []uint16{0x11b},
-	0x53: []uint16{0x11c},
-	0x54: []uint16{},
-	0x55: []uint16{0x11e},
-	0x56: []uint16{0x120},
-	0x57: []uint16{0x110},
-	0x58: []uint16{},
-	0x59: []uint16{0x111},
-	0x5a: []uint16{0x112},
-	0x5b: []uint16{0x113},
-	0x5c: []uint16{0x114},
-	0x5d: []uint16{},
-	0x5e: []uint16{0x115},
-	0x5f: []uint16{0x10d},
-	0x60: []uint16{0x10f},
-	0x61: []uint16{0x119, 0x11d},
-	0x62: []uint16{},
-	0x63: []uint16{0x116},
-	0x64: []uint16{0x121},
-	0x65: []uint16{},
-	0x66: []uint16{0x122},
-	0x67: []uint16{0x118},
-	0x68: []uint16{0x11a},
-	0x69: []uint16{},
-	0x6a: []uint16{0x10e},
-	0x6b: []uint16{},
-	0x6c: []uint16{0x123},
-	0x6d: []uint16{},
-	0x6e: []uint16{0x124},
-	0x6f: []uint16{0x125},
-	0x70: []uint16{},
-	0x71: []uint16{0x126},
-	0x72: []uint16{},
-	0x73: []uint16{0x80},
-	0x74: []uint16{0x51, 0x41, 0x42, 0x32, 0x22},
-	0x75: []uint16{0x30},
-	0x76: []uint16{0x58},
-	0x77: []uint16{0x67},
-	0x78: []uint16{0x68},
-	0x79: []uint16{0x56},
-	0x7a: []uint16{0xe1},
-	0x7b: []uint16{0x0},
-	0x7c: []uint16{0x18},
-	0x7d: []uint16{0x55},
-	0x7e: []uint16{0xe3},
-	0x7f: []uint16{0xe2},
-	0x80: []uint16{0x2f},
-	0x81: []uint16{0x11, 0x2, 0x21},
-	0x82: []uint16{0x3},
-	0x83: []uint16{0x127},
-	0x84: []uint16{},
-}
-
 var fastRomBank uint32 = 0
 
+var roomsWithUnreachableWarpPits map[Supertile]bool
+
 func main() {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+			return
+		}
+	}()
+
 	entranceMinStr, entranceMaxStr := "", ""
 	oopsAllStr, excludeSpritesStr := "", ""
 	flag.BoolVar(&optimizeGIFs, "optimize", true, "optimize GIFs for size with delta frames")
@@ -425,6 +309,22 @@ func main() {
 		}
 	}
 
+	// make data directory:
+	{
+		_, romFilename := filepath.Split(romPath)
+		if i := strings.LastIndexByte(romFilename, '.'); i >= 0 {
+			romFilename = romFilename[:i]
+		}
+		if hackhackhack {
+			romFilename += "-HACK"
+		} else {
+			romFilename += "-data"
+		}
+		fmt.Printf("chdir `%s`\n", romFilename)
+		_ = os.MkdirAll(romFilename, 0755)
+		_ = os.Chdir(romFilename)
+	}
+
 	if err = e.InitEmulator(); err != nil {
 		panic(err)
 	}
@@ -436,14 +336,19 @@ func main() {
 	for i := Supertile(0); i < 0x128; i++ {
 		roomsWithPitDamage[i] = false
 	}
-	for i := 0; i <= 0x70; i++ {
-		romaddr, _ := lorom.BusAddressToPak(0x00_990C)
-		st := Supertile(read16(e.ROM[:], romaddr+uint32(i)<<1))
+	for i := uint32(0x00_990C); i <= uint32(0x00_997C); i += 2 {
+		romaddr, _ := lorom.BusAddressToPak(i)
+		st := Supertile(read16(e.ROM[:], romaddr))
 		roomsWithPitDamage[st] = true
 	}
 
+	roomsWithUnreachableWarpPits = make(map[Supertile]bool, 0x128)
+	roomsWithUnreachableWarpPits[Supertile(0x014)] = true
+	roomsWithUnreachableWarpPits[Supertile(0x061)] = true
+	roomsWithUnreachableWarpPits[Supertile(0x010)] = true
+	roomsWithUnreachableWarpPits[Supertile(0x045)] = true
+
 	const entranceCount = 0x85
-	entranceGroups := make([]Entrance, entranceCount)
 
 	// iterate over entrances:
 	var entranceMin, entranceMax uint8
@@ -473,580 +378,701 @@ func main() {
 		entranceMax = entranceCount - 1
 	}
 
-	//entranceMin, entranceMax := uint8(0), uint8(entranceCount-1)
-
-	wg := sync.WaitGroup{}
-	for eID := entranceMin; eID <= entranceMax; eID++ {
-		g := &entranceGroups[eID]
-		g.EntranceID = eID
-
-		// process entrances in parallel
-		wg.Add(1)
-		go func() {
-			processEntrance(&e, g, &wg)
-			wg.Done()
-		}()
-	}
-
-	wg.Wait()
-
-	if outputEntranceSupertiles {
-		fmt.Printf("rooms := map[uint8][]uint16{\n")
-		for i := range entranceGroups {
-			g := &entranceGroups[i]
-			sts := make([]uint16, 0, 0x100)
-			for _, r := range g.Rooms {
-				sts = append(sts, uint16(r.Supertile))
-			}
-			fmt.Printf("\t%#v: %#v,\n", g.EntranceID, sts)
+	// new simplified reachability:
+	if false {
+		err = reachabilityAnalysis(&e)
+		if err != nil {
+			panic(err)
 		}
-		fmt.Printf("}\n")
 	}
 
-	// condense all maps into big atlas images:
-	if drawEG1 {
-		wg.Add(1)
-		go func() {
-			renderAll("eg1", entranceGroups, 0x00, 0x10)
-			wg.Done()
-		}()
-	}
-	if drawEG2 {
-		wg.Add(1)
-		go func() {
-			renderAll("eg2", entranceGroups, 0x10, 0x3)
-			wg.Done()
-		}()
-	}
-	if drawEG1 || drawEG2 {
+	// run generic processing jobs on all supertiles:
+	if true {
+		//n := runtime.NumCPU()
+		n := 1
+		jobs := make(chan func(), n)
+		for i := 0; i < n; i++ {
+			go func() {
+				defer func() {
+					if err := recover(); err != nil {
+						fmt.Println(err)
+						return
+					}
+				}()
+
+				for job := range jobs {
+					job()
+				}
+			}()
+		}
+
+		st16min, st16max := uint16(0), uint16(0x127)
+		//st16min, st16max := uint16(0x57), uint16(0x57)
+		//st16min, st16max := uint16(0x12), uint16(0x12)
+
+		// generate supertile animations:
+		//roomFn := renderEnemyMovementGif
+		roomFn := renderSupertile
+
+		rooms := make([]*RoomState, 0, 0x128)
+		wg := sync.WaitGroup{}
+		for st16 := st16min; st16 <= st16max; st16++ {
+			st := Supertile(st16)
+
+			var eID uint8
+			if ste, ok := supertileEntrances[uint16(st)]; !ok {
+				// unused supertile:
+				continue
+			} else {
+				eID = ste[0]
+			}
+
+			room := &RoomState{
+				Supertile: st,
+				Entrance:  &Entrance{EntranceID: eID},
+			}
+			rooms = append(rooms, room)
+
+			wg.Add(1)
+			jobs <- func() {
+				defer func() {
+					if err := recover(); err != nil {
+						fmt.Println(err)
+						return
+					}
+				}()
+
+				fmt.Printf("%p\n", room)
+				processRoom(room, &e, roomFn)
+				wg.Done()
+			}
+		}
+
 		wg.Wait()
+
+		// condense all maps into big atlas images:
+		if drawEG1 {
+			wg.Add(1)
+			go func() {
+				renderAll("eg1", rooms, 0x00, 0x10)
+				wg.Done()
+			}()
+		}
+		if drawEG2 {
+			wg.Add(1)
+			go func() {
+				renderAll("eg2", rooms, 0x10, 0x3)
+				wg.Done()
+			}()
+		}
+		if drawEG1 || drawEG2 {
+			wg.Wait()
+		}
+		return
 	}
+
+	// overworld screens:
+	if false {
+		func(initEmu *System) {
+			e := &System{
+				Logger:    nil,
+				LoggerCPU: nil,
+			}
+			if err = e.InitEmulatorFrom(initEmu); err != nil {
+				panic(err)
+			}
+
+			wram := e.WRAM[:]
+
+			a := gif.GIF{}
+			var aLastFrame *image.Paletted = nil
+			renderGifFrame := func() {
+				pal, bg1p, bg2p, addColor, halfColor := renderOWBGLayers(
+					e.WRAM,
+					(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x0000])))[:],
+					(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x2000])))[:],
+					e.VRAM[0x4000:0x8000],
+				)
+				g := image.NewPaletted(image.Rect(0, 0, 512, 512), pal)
+				ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
+				renderSpriteLabels(g, e.WRAM[:], Supertile(read16(e.WRAM[:], 0xA0)))
+
+				dirty := true
+				var delta *image.Paletted
+				if aLastFrame != nil {
+					delta, dirty = generateDeltaFrame(aLastFrame, g)
+				} else {
+					delta = g
+				}
+				aLastFrame = g
+
+				if dirty {
+					a.Image = append(a.Image, delta)
+					a.Delay = append(a.Delay, 2)
+					a.Disposal = append(a.Disposal, gif.DisposalNone)
+				} else {
+					a.Delay[len(a.Delay)-1] += 2
+				}
+			}
+
+			frameTrace := bytes.Buffer{}
+			f := 0
+
+			if false {
+				fmt.Println("module 05")
+				write8(e.WRAM[:], 0x10, 0x05)
+				write8(e.WRAM[:], 0x11, 0x00)
+				write8(e.WRAM[:], 0xB0, 0x00)
+				if err = e.ExecAt(runFramePC, donePC); err != nil {
+					panic(err)
+				}
+				renderGifFrame()
+			}
+
+			if false {
+				// load sanctuary entrance:
+				fmt.Println("load sanctuary entrance")
+				//e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x02
+				e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x00
+				if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
+					panic(err)
+				}
+				f++
+				fmt.Println(f)
+				renderGifFrame()
+			}
+
+			if false {
+				fmt.Println("run 2 frames")
+				//e.Logger = os.Stdout
+				//e.LoggerCPU = os.Stdout
+				for n := 0; n < 30; n++ {
+					if err = e.ExecAt(runFramePC, donePC); err != nil {
+						panic(err)
+					}
+					f++
+					fmt.Println(f)
+					renderGifFrame()
+				}
+
+				RenderGIF(&a, "test.gif")
+				return
+			}
+
+			if true {
+				// emulate until module=7,submodule=0:
+				fmt.Println("wait until module 7")
+				for {
+					if read8(wram, 0x10) == 0x7 && read8(wram, 0x11) == 0 {
+						break
+					}
+					if err = e.ExecAt(runFramePC, donePC); err != nil {
+						panic(err)
+					}
+					f++
+					fmt.Println(f)
+					renderGifFrame()
+				}
+			}
+
+			if true {
+				// now immediately exit sanctuary to go to overworld:
+				//                            BYsSudlr AXLRvvvv
+				e.HWIO.ControllerInput[0] = 0b00000100_00000000
+				// emulate until module=9,submodule=0:
+				fmt.Println("hold DOWN until module 9")
+				for {
+					//if read8(wram, 0x10) != 0x7 /* && read8(wram, 0x11) == 0*/ {
+					//	// dump last frame's CPU trace:
+					//	frameTrace.WriteTo(os.Stdout)
+					//	break
+					//}
+					if read8(wram, 0x10) == 0x9 && read8(wram, 0x11) == 0 {
+						frameTrace.WriteTo(os.Stdout)
+						break
+					}
+					if f&63 == 63 {
+						RenderGIF(&a, "test.gif")
+					}
+					frameTrace.Reset()
+					e.Logger = &frameTrace
+					e.LoggerCPU = &frameTrace
+					//e.LoggerCPU = os.Stdout
+					if err = e.ExecAt(runFramePC, donePC); err != nil {
+						panic(err)
+					}
+					e.Logger = nil
+					e.LoggerCPU = nil
+					f++
+					fmt.Println(f)
+					renderGifFrame()
+				}
+			}
+
+			if true {
+				fmt.Println("release DOWN for 300 frames")
+				e.HWIO.ControllerInput[0] = 0b00000000_00000000
+				for n := 0; n < 300; n++ {
+					//e.LoggerCPU = os.Stdout
+					if err = e.ExecAt(runFramePC, donePC); err != nil {
+						panic(err)
+					}
+					f++
+					fmt.Println(f)
+					renderGifFrame()
+				}
+			}
+
+			pal, bg1p, bg2p, addColor, halfColor := renderOWBGLayers(
+				e.WRAM,
+				(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x0000])))[:],
+				(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x2000])))[:],
+				e.VRAM[0x4000:0x8000],
+			)
+			g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+			ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
+			renderSpriteLabels(g, e.WRAM[:], Supertile(read16(e.WRAM[:], 0xA0)))
+
+			_ = exportPNG("test.png", g)
+
+			RenderGIF(&a, "test.gif")
+		}(&e)
+		return
+	}
+
+	// old floodfill analysis:
+	if false {
+		wg := sync.WaitGroup{}
+		entranceGroups := make([]Entrance, entranceCount)
+		for eID := entranceMin; eID <= entranceMax; eID++ {
+			g := &entranceGroups[eID]
+			g.EntranceID = eID
+
+			// process entrances in parallel
+			wg.Add(1)
+			go func() {
+				processEntrance(&e, g, &wg)
+				wg.Done()
+			}()
+		}
+
+		wg.Wait()
+
+		if outputEntranceSupertiles {
+			fmt.Printf("rooms := map[uint8][]uint16{\n")
+			for i := range entranceGroups {
+				g := &entranceGroups[i]
+				sts := make([]uint16, 0, 0x100)
+				for _, r := range g.Rooms {
+					sts = append(sts, uint16(r.Supertile))
+				}
+				fmt.Printf("\t%#v: %#v,\n", g.EntranceID, sts)
+			}
+			fmt.Printf("}\n")
+		}
+
+		// TODO convert the above to append to a []*RoomState instead of []Entrance
+		//// condense all maps into big atlas images:
+		//if drawEG1 {
+		//	wg.Add(1)
+		//	go func() {
+		//		renderAll("eg1", entranceGroups, 0x00, 0x10)
+		//		wg.Done()
+		//	}()
+		//}
+		//if drawEG2 {
+		//	wg.Add(1)
+		//	go func() {
+		//		renderAll("eg2", entranceGroups, 0x10, 0x3)
+		//		wg.Done()
+		//	}()
+		//}
+		//if drawEG1 || drawEG2 {
+		//	wg.Wait()
+		//}
+	}
+
+	fmt.Println("main exit")
 }
 
-func processEntrance(
-	initEmu *System,
-	g *Entrance,
-	wg *sync.WaitGroup,
-) {
+func processRoom(room *RoomState, initEmu *System, roomFn func(room *RoomState)) {
 	var err error
 
-	e := &System{}
+	eID := room.Entrance.EntranceID
+	e := &room.e
+
+	// have the emulator's WRAM refer to room.WRAM
+	e.WRAM = &room.WRAM
 	if err = e.InitEmulatorFrom(initEmu); err != nil {
 		panic(err)
 	}
 
-	eID := g.EntranceID
-	fmt.Printf("entrance $%02x load start\n", eID)
+	wram := e.WRAM[:]
 
+	//e.LoggerCPU = e.Logger
 	// poke the entrance ID into our asm code:
 	e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = eID
 
-	// load the entrance and draw the room:
-	if eID > 0 {
-		//e.LoggerCPU = os.Stdout
-	}
+	// load the entrance:
 	if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
 		panic(err)
 	}
-	e.LoggerCPU = nil
 
-	fmt.Printf("entrance $%02x load complete\n", eID)
+	// load and draw selected supertile:
+	write16(wram, 0xA0, uint16(room.Supertile))
+	write16(wram, 0x048E, uint16(room.Supertile))
+	//e.Logger = os.Stdout
+	//e.LoggerCPU = os.Stdout
+	if err = e.ExecAt(loadSupertilePC, donePC); err != nil {
+		panic(err)
+	}
+	room.WRAMAfterLoaded = room.WRAM
 
-	g.Supertile = Supertile(read16(e.WRAM[:], 0xA0))
+	copy((&room.VRAMTileSet)[:], e.VRAM[0x4000:0x8000])
 
+	roomFn(room)
+}
+
+func renderEnemyMovementGif(room *RoomState) {
+	if enemyMovementFrames <= 0 {
+		return
+	}
+
+	e := &room.e
+	st := room.Supertile
+	wram := e.WRAM[:]
+	vram := e.VRAM[:]
+
+	dungeonID := read8(wram, 0x040C)
+
+	namePrefix := fmt.Sprintf("t%03x.d%02x", uint16(st), dungeonID)
+	isInteresting := true
+	spriteDead := [16]bool{}
+	spriteID := [16]uint8{}
+	for j := 0; j < 16; j++ {
+		spriteDead[j] = read8(wram, uint32(0x0DD0+j)) == 0
+		spriteID[j] = read8(wram, uint32(0x0E20+j))
+	}
+
+	// run for N frames and render each frame into a GIF:
+	sx, sy := room.Supertile.AbsTopLeft()
+	fmt.Printf(
+		"t%03x: abs=(%04x, %04x), bg1=(%04x,%04x), bg2=(%04x,%04x)\n",
+		uint16(room.Supertile),
+		sx,
+		sy,
+		read16(wram, 0xE0),
+		read16(wram, 0xE6),
+		read16(wram, 0xE2),
+		read16(wram, 0xE8),
+	)
+
+	// place Link at the entrypoint:
+	if true {
+		// TODO: find a good place for Link to start
+		//linkX, linkY := ep.Point.ToAbsCoord(st)
+		//linkX, linkY := uint16(0x1000), uint16(0x1000)
+		linkX, linkY := sx+8, sy+14
+		//// nudge link within visible bounds:
+		//if linkX&0x1FF < 0x20 {
+		//	linkX += 0x20
+		//}
+		//if linkX&0x1FF > 0x1E0 {
+		//	linkX -= 0x20
+		//}
+		//if linkY&0x1FF < 0x20 {
+		//	linkY += 0x20
+		//}
+		//if linkY&0x1FF > 0x1E0 {
+		//	linkY -= 0x20
+		//}
+		//linkY += 14
+		write16(wram, 0x22, linkX)
+		write16(wram, 0x20, linkY)
+	}
+
+	gifName := fmt.Sprintf("%s.move.gif", namePrefix)
+	fmt.Printf("rendering %s\n", gifName)
+
+	// first frame of enemy movement GIF:
+	var lastFrame *image.Paletted
 	{
-		// if this is the entrance, Link should be already moved to his starting position:
-		wram := e.WRAM[:]
-		linkX := read16(wram, 0x22)
-		linkY := read16(wram, 0x20)
-		linkLayer := read16(wram, 0xEE)
-		g.EntryCoord = AbsToMapCoord(linkX, linkY, linkLayer)
-		//fmt.Printf("  link coord = {%04x, %04x, %04x}\n", linkX, linkY, linkLayer)
-	}
+		copy((&room.VRAMTileSet)[:], vram[0x4000:0x8000])
 
-	g.Rooms = make([]*RoomState, 0, 0x20)
-	g.Supertiles = make(map[Supertile]*RoomState, 0x128)
-
-	// build a stack (LIFO) of supertile entry points to visit:
-	lifo := make([]EntryPoint, 0, 0x100)
-	lifo = append(lifo, EntryPoint{g.Supertile, g.EntryCoord, DirNone, ExitPoint{}})
-	if staticEntranceMap {
-		// queue up all supertiles that belong to this entrance:
-		for _, supertile := range entranceSupertiles[g.EntranceID] {
-			lifo = append(lifo, EntryPoint{
-				Supertile: Supertile(supertile),
-				Point:     g.EntryCoord, // TODO!
-				Direction: DirNone,
-				From:      ExitPoint{},
-			})
-		}
-	}
-
-	// process the LIFO:
-	for len(lifo) != 0 {
-		// pop off the stack:
-		lifoEnd := len(lifo) - 1
-		ep := lifo[lifoEnd]
-		lifo = lifo[0:lifoEnd]
-
-		this := ep.Supertile
-
-		//fmt.Printf("  ep = %s\n", ep)
-
-		// create a room:
-		var room *RoomState
-
-		g.SupertilesLock.Lock()
-		var ok bool
-		if room, ok = g.Supertiles[this]; ok {
-			//fmt.Printf("    reusing room %s\n", this)
-			//if eID != room.Entrance.EntranceID {
-			//	panic(fmt.Errorf("conflicting entrances for room %s", this))
-			//}
-		} else {
-			// create new room:
-			room = CreateRoom(g, this, e)
-			g.Rooms = append(g.Rooms, room)
-			g.Supertiles[this] = room
-		}
-		g.SupertilesLock.Unlock()
-
-		// emulate loading the room:
-		room.Lock()
-		//fmt.Printf("entrance $%02x supertile %s discover from entry %s start\n", eID, room.Supertile, ep)
-
-		if err = room.Init(ep); err != nil {
-			panic(err)
-		}
-
-		if !staticEntranceMap {
-			// check if room causes pit damage vs warp:
-			// RoomsWithPitDamage#_00990C [0x70]uint16
-			pitDamages := roomsWithPitDamage[this]
-
-			warpExitTo := room.WarpExitTo
-			stairExitTo := &room.StairExitTo
-			warpExitLayer := room.WarpExitLayer
-			stairTargetLayer := &room.StairTargetLayer
-
-			pushEntryPoint := func(ep EntryPoint, name string) {
-				// for EG2:
-				if this >= 0x100 {
-					ep.Supertile |= 0x100
-				}
-
-				room.EntryPoints = append(room.EntryPoints, ep)
-				room.ExitPoints = append(room.ExitPoints, ExitPoint{
-					Supertile:    ep.Supertile,
-					Point:        ep.From.Point,
-					Direction:    ep.From.Direction,
-					WorthMarking: ep.From.WorthMarking,
-				})
-
-				lifo = append(lifo, ep)
-				//fmt.Printf("    %s to %s\n", name, ep)
-			}
-
-			// dont need to read interroom stair list from $06B0; just link stair tile number to STAIRnTO exit
-
-			// flood fill to find reachable tiles:
-			tiles := &room.Tiles
-			room.FindReachableTiles(
-				ep,
-				func(s ScanState, v uint8) {
-					t := s.t
-					d := s.d
-
-					exit := ExitPoint{
-						ep.Supertile,
-						t,
-						d,
-						false,
-					}
-
-					// here we found a reachable tile:
-					room.Reachable[t] = v
-
-					if v == 0x00 {
-						// detect edge walkways:
-						if ok, edir, _, _ := t.IsEdge(); ok {
-							if sn, _, ok := this.MoveBy(edir); ok {
-								pushEntryPoint(EntryPoint{sn, t.OppositeEdge(), edir, exit}, fmt.Sprintf("%s walkway", edir))
-							}
-						}
-						return
-					}
-
-					// door objects:
-					if v >= 0xF0 {
-						//fmt.Printf("    door tile $%02x at %s\n", v, t)
-						// dungeon exits are already patched out, so this should be a normal door
-						lyr, row, col := t.RowCol()
-						if row >= 0x3A {
-							// south:
-							if sn, sd, ok := this.MoveBy(DirSouth); ok {
-								pushEntryPoint(EntryPoint{sn, MapCoord(lyr | (0x06 << 6) | col), sd, exit}, "south door")
-							}
-						} else if row <= 0x06 {
-							// north:
-							if sn, sd, ok := this.MoveBy(DirNorth); ok {
-								pushEntryPoint(EntryPoint{sn, MapCoord(lyr | (0x3A << 6) | col), sd, exit}, "north door")
-							}
-						} else if col >= 0x3A {
-							// east:
-							if sn, sd, ok := this.MoveBy(DirEast); ok {
-								pushEntryPoint(EntryPoint{sn, MapCoord(lyr | (row << 6) | 0x06), sd, exit}, "east door")
-							}
-						} else if col <= 0x06 {
-							// west:
-							if sn, sd, ok := this.MoveBy(DirWest); ok {
-								pushEntryPoint(EntryPoint{sn, MapCoord(lyr | (row << 6) | 0x3A), sd, exit}, "west door")
-							}
-						}
-
-						return
-					}
-
-					// interroom doorways:
-					if (v >= 0x80 && v <= 0x8D) || (v >= 0x90 && v <= 97) {
-						if ok, edir, _, _ := t.IsDoorEdge(); ok && edir == d {
-							// at or beyond the door edge zones:
-							swapLayers := MapCoord(0)
-
-							{
-								// search the doorway for layer-swaps:
-								tn := t
-								for i := 0; i < 8; i++ {
-									vd := tiles[tn]
-									room.Reachable[tn] = vd
-									if vd >= 0x90 && vd <= 0x9F {
-										swapLayers = 0x1000
-									}
-									if vd >= 0xA8 && vd <= 0xAF {
-										swapLayers = 0x1000
-									}
-									if _, ok := room.SwapLayers[tn]; ok {
-										swapLayers = 0x1000
-									}
-
-									// advance into the doorway:
-									tn, _, ok = tn.MoveBy(edir, 1)
-									if !ok {
-										break
-									}
-								}
-							}
-
-							if v&1 == 0 {
-								// north-south normal doorway (no teleport doorways for north-south):
-								if sn, _, ok := this.MoveBy(edir); ok {
-									pushEntryPoint(EntryPoint{sn, t.OnEdge(edir.Opposite()) ^ swapLayers, edir, exit}, "north-south doorway")
-								}
-							} else {
-								// east-west doorway:
-								if v == 0x89 {
-									// teleport doorway:
-									if edir == DirWest {
-										pushEntryPoint(EntryPoint{stairExitTo[2], t.OnEdge(edir.Opposite()) ^ swapLayers, edir, exit}, "west teleport doorway")
-									} else if edir == DirEast {
-										pushEntryPoint(EntryPoint{stairExitTo[3], t.OnEdge(edir.Opposite()) ^ swapLayers, edir, exit}, "east teleport doorway")
-									} else {
-										panic("invalid direction approaching east-west teleport doorway")
-									}
-								} else {
-									// normal doorway:
-									if sn, _, ok := this.MoveBy(edir); ok {
-										pushEntryPoint(EntryPoint{sn, t.OnEdge(edir.Opposite()) ^ swapLayers, edir, exit}, "east-west doorway")
-									}
-								}
-							}
-						}
-						return
-					}
-
-					if v >= 0x30 && v < 0x38 {
-						var vn uint8
-						vn = tiles[t-0x40]
-						if vn == 0x80 || vn == 0x26 {
-							vn = tiles[t+0x40]
-						}
-
-						if vn == 0x5E || vn == 0x5F {
-							// spiral staircase
-							tgtLayer := stairTargetLayer[v&3]
-							dt := t
-							if v&4 == 0 {
-								// going up
-								if t&0x1000 != 0 {
-									dt += 0x80
-								}
-								if tgtLayer != 0 {
-									dt += 0x80
-								}
-								pushEntryPoint(EntryPoint{stairExitTo[v&3], dt&0x0FFF | tgtLayer, d.Opposite(), exit}, fmt.Sprintf("spiralStair(%s)", t))
-							} else {
-								// going down
-								if t&0x1000 != 0 {
-									dt -= 0x80
-								}
-								if tgtLayer != 0 {
-									dt -= 0x80
-								}
-								pushEntryPoint(EntryPoint{stairExitTo[v&3], dt&0x0FFF | tgtLayer, d.Opposite(), exit}, fmt.Sprintf("spiralStair(%s)", t))
-							}
-							return
-						} else if vn == 0x38 {
-							// north stairs:
-							tgtLayer := stairTargetLayer[v&3]
-							dt := t.Col() + 0xFC0 - 2<<6
-							if v&4 == 0 {
-								// going up
-								if t&0x1000 != 0 {
-									// 32 pixels = 4 8x8 tiles
-									dt -= 4 << 6
-								}
-								if tgtLayer != 0 {
-									// 32 pixels = 4 8x8 tiles
-									dt -= 4 << 6
-								}
-							} else {
-								// going down
-								// module #$07 submodule #$12 is going down north stairs (e.g. $042)
-								if t&0x1000 != 0 {
-									// 32 pixels = 4 8x8 tiles
-									dt += 4 << 6
-								}
-								if tgtLayer != 0 {
-									// 32 pixels = 4 8x8 tiles
-									dt += 4 << 6
-								}
-							}
-							pushEntryPoint(EntryPoint{stairExitTo[v&3], dt&0x0FFF | tgtLayer, d, exit}, fmt.Sprintf("northStair(%s)", t))
-							return
-						} else if vn == 0x39 {
-							// south stairs:
-							tgtLayer := stairTargetLayer[v&3]
-							dt := t.Col() + 2<<6
-							if v&4 == 0 {
-								// going up
-								if t&0x1000 != 0 {
-									// 32 pixels = 4 8x8 tiles
-									dt -= 4 << 6
-								}
-								if tgtLayer != 0 {
-									// 32 pixels = 4 8x8 tiles
-									dt -= 4 << 6
-								}
-							} else {
-								// going down
-								if t&0x1000 != 0 {
-									// 32 pixels = 4 8x8 tiles
-									dt += 4 << 6
-								}
-								if tgtLayer != 0 {
-									// 32 pixels = 4 8x8 tiles
-									dt += 4 << 6
-								}
-							}
-							pushEntryPoint(EntryPoint{stairExitTo[v&3], dt&0x0FFF | tgtLayer, d, exit}, fmt.Sprintf("southStair(%s)", t))
-							return
-						} else if vn == 0x00 {
-							// straight stairs:
-							pushEntryPoint(EntryPoint{stairExitTo[v&3], t&0x0FFF | stairTargetLayer[v&3], d.Opposite(), exit}, fmt.Sprintf("stair(%s)", t))
-							return
-						}
-						panic(fmt.Errorf("unhandled stair exit at %s %s", t, d))
-						return
-					}
-
-					// pit exits:
-					if !pitDamages {
-						if v == 0x20 {
-							// pit tile
-							exit.WorthMarking = !room.markedPit
-							room.markedPit = true
-							pushEntryPoint(EntryPoint{warpExitTo, t&0x0FFF | warpExitLayer, d, exit}, fmt.Sprintf("pit(%s)", t))
-							return
-						} else if v == 0x62 {
-							// bombable floor tile
-							exit.WorthMarking = !room.markedFloor
-							room.markedFloor = true
-							pushEntryPoint(EntryPoint{warpExitTo, t&0x0FFF | warpExitLayer, d, exit}, fmt.Sprintf("bombableFloor(%s)", t))
-							return
-						}
-					}
-					if v == 0x4B {
-						// warp floor tile
-						exit.WorthMarking = t&0x40 == 0 && t&0x01 == 0
-						pushEntryPoint(EntryPoint{warpExitTo, t&0x0FFF | warpExitLayer, d, exit}, fmt.Sprintf("warp(%s)", t))
-						return
-					}
-
-					if true {
-						// manipulables (pots, hammer pegs, push blocks):
-						if v&0xF0 == 0x70 {
-							// find gfx tilemap position:
-							j := (uint32(v) & 0x0F) << 1
-							p := read16(room.WRAM[:], 0x0500+j)
-							//fmt.Printf("    manip(%s) %02x = %04x\n", t, v, p)
-							if p == 0 {
-								//fmt.Printf("    pushBlock(%s)\n", t)
-
-								// push block flips 0x0641
-								write8(room.WRAM[:], 0x0641, 0x01)
-								if read8(room.WRAM[:], 0xAE)|read8(room.WRAM[:], 0xAF) != 0 {
-									// handle tags if there are any after the push to see if it triggers a secret:
-									room.HandleRoomTags()
-									// TODO: properly determine which tag was activated
-									room.TilesVisited = room.TilesVisitedTag0
-								}
-							}
-							return
-						}
-
-						v16 := read16(room.Tiles[:], uint32(t))
-						if v16 == 0x3A3A || v16 == 0x3B3B {
-							//fmt.Printf("    star(%s)\n", t)
-
-							// set absolute x,y coordinates to the tile:
-							x, y := t.ToAbsCoord(room.Supertile)
-							write16(room.WRAM[:], 0x20, y)
-							write16(room.WRAM[:], 0x22, x)
-							write16(room.WRAM[:], 0xEE, (uint16(t)&0x1000)>>10)
-
-							room.HandleRoomTags()
-
-							// swap out visited maps:
-							if read8(room.WRAM[:], 0x04BC) == 0 {
-								//fmt.Printf("    star0\n")
-								room.TilesVisited = room.TilesVisitedStar0
-								//ioutil.WriteFile(fmt.Sprintf("data/%03X.cmap0", uint16(this)), room.Tiles[:], 0644)
-							} else {
-								//fmt.Printf("    star1\n")
-								room.TilesVisited = room.TilesVisitedStar1
-								//ioutil.WriteFile(fmt.Sprintf("data/%03X.cmap1", uint16(this)), room.Tiles[:], 0644)
-							}
-							return
-						}
-
-						// floor or pressure switch:
-						if v16 == 0x2323 || v16 == 0x2424 {
-							//fmt.Printf("    switch(%s)\n", t)
-
-							// set absolute x,y coordinates to the tile:
-							x, y := t.ToAbsCoord(room.Supertile)
-							write16(room.WRAM[:], 0x20, y)
-							write16(room.WRAM[:], 0x22, x)
-							write16(room.WRAM[:], 0xEE, (uint16(t)&0x1000)>>10)
-
-							if room.HandleRoomTags() {
-								// reset current room visited state:
-								for i := range room.TilesVisited {
-									delete(room.TilesVisited, i)
-								}
-								//ioutil.WriteFile(fmt.Sprintf("data/%03X.cmap0", uint16(this)), room.Tiles[:], 0644)
-							}
-							return
-						}
-					}
-				},
-			)
-
-			//ioutil.WriteFile(fmt.Sprintf("data/%03X.rch", uint16(this)), room.Reachable[:], 0644)
-
-			//fmt.Printf("entrance $%02x supertile %s discover from entry %s complete\n", eID, room.Supertile, ep)
-		}
-
-		room.Unlock()
-	}
-
-	// render all supertiles found:
-	for _, room := range g.Rooms {
-		if supertileGifs || animateRoomDrawing {
-			wg.Add(1)
-			go func(r *RoomState) {
-				r.Lock()
-				defer r.Unlock()
-
-				fmt.Printf("entrance $%02x supertile %s draw start\n", g.EntranceID, r.Supertile)
-
-				if supertileGifs {
-					RenderGIF(&r.GIF, fmt.Sprintf("data/%03x.%02x.gif", uint16(r.Supertile), r.Entrance.EntranceID))
-				}
-
-				if animateRoomDrawing {
-					RenderGIF(&r.Animated, fmt.Sprintf("data/%03x.%02x.room.gif", uint16(r.Supertile), r.Entrance.EntranceID))
-				}
-
-				fmt.Printf("entrance $%02x supertile %s draw complete\n", g.EntranceID, r.Supertile)
-				wg.Done()
-			}(room)
-		}
-
-		// render VRAM BG tiles to a PNG:
+		pal, bg1p, bg2p, addColor, halfColor := room.RenderBGLayers()
 		if false {
-			cgram := (*(*[0x100]uint16)(unsafe.Pointer(&room.WRAM[0xC300])))[:]
-			pal := cgramToPalette(cgram)
-
-			tiles := 0x4000 / 32
-			g := image.NewPaletted(image.Rect(0, 0, 16*8, (tiles/16)*8), pal)
-			for t := 0; t < tiles; t++ {
-				// palette 2
-				z := uint16(t) | (2 << 10)
-				draw4bppTile(
-					g,
-					z,
-					(&room.VRAMTileSet)[:],
-					t%16,
-					t/16,
-				)
+			if err := exportPNG(fmt.Sprintf("%03x.%02x.bg1.0.png", uint16(room.Supertile), room.Entrance.EntranceID), bg1p[0]); err != nil {
+				panic(err)
 			}
-
-			if err = exportPNG(fmt.Sprintf("data/%03X.vram.png", uint16(room.Supertile)), g); err != nil {
+			if err := exportPNG(fmt.Sprintf("%03x.%02x.bg1.1.png", uint16(room.Supertile), room.Entrance.EntranceID), bg1p[1]); err != nil {
+				panic(err)
+			}
+			if err := exportPNG(fmt.Sprintf("%03x.%02x.bg2.0.png", uint16(room.Supertile), room.Entrance.EntranceID), bg2p[0]); err != nil {
+				panic(err)
+			}
+			if err := exportPNG(fmt.Sprintf("%03x.%02x.bg2.1.png", uint16(room.Supertile), room.Entrance.EntranceID), bg2p[1]); err != nil {
 				panic(err)
 			}
 		}
-	}
-}
+		g := image.NewPaletted(image.Rect(0, 0, 512, 512), pal)
+		ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
+		room.RenderSprites(g)
 
-func scanForTileTypes(e *System) {
-	var err error
-
-	// scan underworld for certain tile types:
-	// poke the entrance ID into our asm code:
-	e.HWIO.Dyn[setEntranceIDPC-0x5000] = 0x00
-	// load the entrance and draw the room:
-	if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
-		panic(err)
-	}
-
-	for st := uint16(0); st < 0x128; st++ {
-		// load and draw current supertile:
-		write16(e.HWIO.Dyn[:], b01LoadAndDrawRoomSetSupertilePC-0x01_5000, st)
-		if err = e.ExecAt(b01LoadAndDrawRoomPC, 0); err != nil {
-			panic(err)
-		}
-
-		found := false
-		for t, v := range e.WRAM[0x12000:0x14000] {
-			if v == 0x0A {
-				found = true
-				fmt.Printf("%s: %s = $0A\n", Supertile(st), MapCoord(t))
+		// HACK:
+		if hackhackhack {
+			fmt.Println("oops all pipes!")
+			for i := uint32(0); i < 16; i++ {
+				et := read8(wram, 0x0E20+i)
+				if et < 0xAE || st > 0xB1 {
+					write8(wram, 0x0E20+i, uint8(i&3)+0xAE)
+				}
 			}
 		}
 
-		if found {
-			ioutil.WriteFile(fmt.Sprintf("data/%03x.tmap", st), e.WRAM[0x12000:0x14000], 0644)
+		lastFrame = g
+		room.EnemyMovementGIF.Image = append(room.EnemyMovementGIF.Image, g)
+		room.EnemyMovementGIF.Delay = append(room.EnemyMovementGIF.Delay, 20)
+		room.EnemyMovementGIF.Disposal = append(room.EnemyMovementGIF.Disposal, gif.DisposalNone)
+		room.EnemyMovementGIF.LoopCount = 0
+		room.EnemyMovementGIF.BackgroundIndex = 0
+	}
+
+movement:
+	for i := 0; i < enemyMovementFrames; i++ {
+		//fmt.Println("FRAME")
+		//e.LoggerCPU = os.Stdout
+		// move camera to all four quadrants to get all enemies moving:
+		// NEW: patched out sprite handling to disable off-screen check
+		for j := 0; j < 1; j++ {
+			// BG1H
+			write16(wram, 0xE0, uint16(j&1)<<8+sx)
+			// BG2H
+			write16(wram, 0xE2, uint16(j&1)<<8+sx)
+			// BG1V
+			write16(wram, 0xE6, uint16(j&2)<<7+sy)
+			// BG2V
+			write16(wram, 0xE8, uint16(j&2)<<7+sy)
+
+			if err := e.ExecAtUntil(b00RunSingleFramePC, 0, 0x200000); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				break movement
+			}
+			//e.LoggerCPU = nil
+
+			// sanity check:
+			if supertileWram := read16(wram, 0xA0); supertileWram != uint16(room.Supertile) {
+				fmt.Fprintf(os.Stderr, "%s: supertile in wram does not match expected\n", namePrefix)
+				break movement
+			}
+
+			// update tile sets after NMI; e.g. animated tiles:
+			copy((&room.VRAMTileSet)[:], vram[0x4000:0x8000])
+
+			// check for any killed sprites:
+			for j := 0; j < 16; j++ {
+				if spriteDead[j] {
+					continue
+				}
+
+				sDead := read8(wram, uint32(0x0DD0+j)) == 0
+				if sDead {
+					sID := read8(wram, uint32(0x0E20+j))
+					fmt.Fprintf(os.Stderr, "%s: sprite %02x killed on frame %3d\n", namePrefix, sID, i)
+					if sID == 0x9b {
+						isInteresting = true
+					}
+					spriteDead[j] = true
+				}
+			}
+
+			{
+				pal, bg1p, bg2p, addColor, halfColor := room.RenderBGLayers()
+				g := image.NewPaletted(image.Rect(0, 0, 512, 512), pal)
+				ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
+				//renderOAMSprites(g, e.WRAM, e.VRAM, e.OAM, 0, 0)
+				renderSpriteLabels(g, e.WRAM[:], st)
+
+				delta := g
+				dirty := false
+				disposal := byte(0)
+				if optimizeGIFs && room.EnemyMovementGIF.Image != nil {
+					delta, dirty = generateDeltaFrame(lastFrame, g)
+					//_ = exportPNG(fmt.Sprintf("%s.fr%03d.png", namePrefix, i), delta)
+					disposal = gif.DisposalNone
+				}
+
+				if !dirty && room.EnemyMovementGIF.Image != nil {
+					// just increment last frame's delay if nothing changed:
+					room.EnemyMovementGIF.Delay[len(room.EnemyMovementGIF.Delay)-1] += 2
+				} else {
+					room.EnemyMovementGIF.Image = append(room.EnemyMovementGIF.Image, delta)
+					room.EnemyMovementGIF.Delay = append(room.EnemyMovementGIF.Delay, 2)
+					room.EnemyMovementGIF.Disposal = append(room.EnemyMovementGIF.Disposal, disposal)
+				}
+				lastFrame = g
+			}
 		}
 	}
 
-	return
+	fmt.Printf("rendered  %s\n", gifName)
+	if isInteresting {
+		RenderGIF(&room.EnemyMovementGIF, gifName)
+		fmt.Printf("wrote     %s\n", gifName)
+	}
 
+	// reset WRAM:
+	room.WRAM = room.WRAMAfterLoaded
 }
+
+func renderOAMSprites(g *image.Paletted, wram *WRAMArray, vram *VRAMArray, oam *OAMArray, qx int, qy int) {
+	for i := 0; i < 128; i++ {
+		//fmt.Printf("[%02X,0]: %02X\n", i, oam[i<<2+0])
+		//fmt.Printf("[%02X,1]: %02X\n", i, oam[i<<2+1])
+		//fmt.Printf("[%02X,2]: %02X\n", i, oam[i<<2+2])
+		//fmt.Printf("[%02X,3]: %02X\n", i, oam[i<<2+3])
+		bits := oam[512+(i>>3)] >> ((i & 3) << 1) & 3
+		//fmt.Printf("[%02X,4]: %02X\n", i, bits)
+
+		x := int(oam[i<<2+0]) | ((int(bits) & 1) << 8)
+		y := int(oam[i<<2+1])
+		t := int(oam[i<<2+2])
+		tn := int(oam[i<<2+3]) & 1
+		fv := oam[i<<2+3]&0x80 != 0
+		fh := oam[i<<2+3]&0x40 != 0
+		pri := oam[i<<2+3] & 0x30 >> 4
+		pal := oam[i<<2+3] & 0xE >> 1
+
+		if x >= 256 {
+			x -= 512
+		}
+		if y >= 0xF0 {
+			y -= 0x100
+		}
+
+		//ta := room.e.HWIO.PPU.ObjTilemapAddress + uint32(t)*0x20
+		//ta += uint32(tn) * room.e.HWIO.PPU.ObjNamespaceSeparation
+		//ta &= 0xFFFF
+		//room.e.VRAM[ta]
+		drawShadowedString(
+			g,
+			image.White,
+			fixed.Point26_6{X: fixed.I(qx + x), Y: fixed.I(qy + y + 12)},
+			fmt.Sprintf("%03X", t|tn<<8),
+		)
+		_, _, _, _ = fv, fh, pri, pal
+	}
+}
+
+func renderSpriteLabels(g draw.Image, wram []byte, st Supertile) {
+	//black := image.NewUniform(color.RGBA{0, 0, 0, 255})
+	yellow := image.NewUniform(color.RGBA{255, 255, 0, 255})
+	red := image.NewUniform(color.RGBA{255, 48, 48, 255})
+
+	// draw sprites:
+	for i := uint32(0); i < 16; i++ {
+		clr := yellow
+
+		// Initial AI state on load:
+		//initialAIState := read8(room.WRAMAfterLoaded[:], 0x0DD0+i)
+		//if initialAIState == 0 {
+		//	// nothing was ever here:
+		//	continue
+		//}
+
+		// determine if in bounds:
+		yl, yh := read8(wram, 0x0D00+i), read8(wram, 0x0D20+i)
+		xl, xh := read8(wram, 0x0D10+i), read8(wram, 0x0D30+i)
+		y := uint16(yl) | uint16(yh)<<8
+		x := uint16(xl) | uint16(xh)<<8
+		if !st.IsAbsInBounds(x, y) {
+			continue
+		}
+
+		// AI state:
+		st := read8(wram, 0x0DD0+i)
+		// enemy type:
+		et := read8(wram, 0x0E20+i)
+
+		var lx, ly int
+		if true {
+			lx = int(x) & 0x1FF
+			ly = int(y) & 0x1FF
+		} else {
+			coord := AbsToMapCoord(x, y, 0)
+			_, row, col := coord.RowCol()
+			lx = int(col << 3)
+			ly = int(row << 3)
+		}
+
+		//fmt.Printf(
+		//	"%02x @ abs(%04x, %04x) -> map(%04x, %04x)\n",
+		//	et,
+		//	x,
+		//	y,
+		//	col,
+		//	row,
+		//)
+
+		hb := hitbox[read8(wram, 0x0F60+i)&0x1F]
+
+		if st == 0 {
+			// dead:
+			clr = red
+		}
+
+		drawOutlineBox(g, clr, lx+hb.X, ly+hb.Y, hb.W, hb.H)
+
+		// colored number label:
+		drawShadowedString(g, clr, fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)}, fmt.Sprintf("%02X", et))
+	}
+
+	// draw Link:
+	{
+		x := read16(wram, 0x22)
+		y := read16(wram, 0x20)
+		var lx, ly int
+		if true {
+			lx = int(x) & 0x1FF
+			ly = int(y) & 0x1FF
+		} else {
+			coord := AbsToMapCoord(x, y, 0)
+			_, row, col := coord.RowCol()
+			lx = int(col << 3)
+			ly = int(row << 3)
+		}
+
+		green := image.NewUniform(color.RGBA{0, 255, 0, 255})
+		drawOutlineBox(g, green, lx, ly, 16, 16)
+		drawShadowedString(g, green, fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)}, "LK")
+	}
+}
+
+type Hitbox struct {
+	X int
+	Y int
+	W int
+	H int
+}
+
+var hitbox [32]Hitbox
 
 func setupAlttp(e *System) {
 	var a *asm.Emitter
 	var err error
+
+	// pool Sprite_SetupHitBox
+	//  .offset_x_low#_06F735
+	// .offset_x_high#_06F755
+	//         .width#_06F775
+	//  .offset_y_low#_06F795
+	// .offset_y_high#_06F7B5
+	//        .height#_06F7D5
+	for i := uint32(0); i < 32; i++ {
+		hitbox[i].X = int(int8(e.Bus.Read8(0x06_F735 + i)))
+		hitbox[i].Y = int(int8(e.Bus.Read8(0x06_F795 + i)))
+		hitbox[i].W = int(int8(e.Bus.Read8(0x06_F775 + i)))
+		hitbox[i].H = int(int8(e.Bus.Read8(0x06_F7D5 + i)))
+	}
 
 	// initialize game:
 	e.CPU.Reset()
@@ -1135,23 +1161,35 @@ func setupAlttp(e *System) {
 		a.SetBase(fastRomBank | 0x00_5000)
 		a.SEP(0x30)
 
-		a.Comment("InitializeTriforceIntro#_0CF03B: sets up initial state")
-		a.JSL(fastRomBank | 0x0C_F03B)
-		a.Comment("Intro_CreateTextPointers#_028022")
-		a.JSL(fastRomBank | 0x02_8022)
-		a.Comment("Overworld_LoadAllPalettes_long#_02802A")
-		a.JSL(fastRomBank | 0x02_802A)
-		a.Comment("DecompressFontGFX#_0EF572")
-		a.JSL(fastRomBank | 0x0E_F572)
-
-		a.Comment("LoadDefaultGraphics#_00E310")
-		a.JSL(fastRomBank | 0x00_E310)
 		a.Comment("LoadDefaultTileTypes#_0FFD2A")
 		a.JSL(fastRomBank | 0x0F_FD2A)
-		//a.Comment("DecompressAnimatedUnderworldTiles#_00D377")
-		//a.JSL(fastRomBank | 0x00_D377)
+		a.Comment("Intro_InitializeDefaultGFX#_0CC208")
+		a.JSL(0x0C_C208)
+		//a.Comment("LoadDefaultGraphics#_00E310")
+		//a.JSL(fastRomBank | 0x00_E310)
 		//a.Comment("InitializeTilesets#_00E1DB")
 		//a.JSL(fastRomBank | 0x00_E1DB)
+		//a.LDY_imm8_b(0x5D)
+		//a.Comment("DecompressAnimatedUnderworldTiles#_00D377")
+		//a.JSL(fastRomBank | 0x00_D377)
+
+		a.Comment("Intro_CreateTextPointers#_028022")
+		a.JSL(fastRomBank | 0x02_8022)
+		a.Comment("DecompressFontGFX#_0EF572")
+		a.JSL(fastRomBank | 0x0E_F572)
+		a.Comment("LoadItemGFXIntoWRAM4BPPBuffer#_00D271")
+		a.JSL(fastRomBank | 0x00_D271)
+
+		// initialize SRAM save file:
+		a.REP(0x10)
+		a.LDX_imm16_w(0)
+		a.SEP(0x10)
+		a.Comment("InitializeSaveFile#_0CDB3E")
+		a.JSL(0x0C_DB3E)
+
+		// this initializes some important DMA transfer source addresses to eliminate garbage transfers to VRAM[0]
+		a.Comment("CopySaveToWRAM#_0CCEB2")
+		a.JSL(0x0C_CEB2)
 
 		// general world state:
 		a.Comment("disable rain")
@@ -1162,6 +1200,56 @@ func setupAlttp(e *System) {
 		a.LDA_imm8_b(0x10)
 		a.STA_long(0x7EF3C6)
 
+		// non-zero mirroring to skip message prompt on file load:
+		a.STA_long(0x7EC011)
+
+		//a.BRA("mainRouting")
+		a.STP()
+		//a.BRA("loadEntrance")
+
+		// load an overworld from an underworld exit:
+		loadExitPC = a.Label("loadExit")
+		a.REP(0x30)
+		setExitSupertilePC = a.Label("setExitSupertile") + 1
+		// set underworld supertile ID we're exiting from:
+		a.LDA_imm16_w(0x0012)
+		a.STA_dp(0xA0)
+
+		// transition to overworld:
+		loadOverworldPC = a.Label("loadOverworld")
+		a.SEP(0x30)
+		a.LDA_imm8_b(0x08)
+		a.STA_abs(0x010C)
+		a.STA_dp(0x10)
+		a.STZ_dp(0x11)
+		a.STZ_dp(0xB0)
+		// DeleteCertainAncillaeStopDashing#_028A0E
+		a.Comment("DeleteCertainAncillaeStopDashing")
+		// Ancilla_TerminateSelectInteractives#_09AC57
+		a.JSL(0x09_AC57)
+		a.LDA_abs(0x0372)
+		a.BEQ("mainRouting")
+
+		a.STZ_dp(0x4D)
+		a.STZ_dp(0x46)
+
+		a.LDA_imm8_b(0xFF)
+		a.STA_dp(0x29)
+		a.STA_dp(0xC7)
+
+		a.STZ_dp(0x3D)
+		a.STZ_dp(0x5E)
+
+		a.STZ_abs(0x032B)
+		a.STZ_abs(0x0372)
+
+		//#_028A2B: LDA.b #$00 ; LINKSTATE 00
+		a.LDA_imm8_b(0x00)
+		//#_028A2D: STA.b $5D
+		a.STA_dp(0x5D)
+		a.BRA("mainRouting")
+
+		// loads a dungeon given an entrance ID:
 		loadEntrancePC = a.Label("loadEntrance")
 		a.SEP(0x30)
 		// prepare to call the underworld room load module:
@@ -1176,7 +1264,12 @@ func setupAlttp(e *System) {
 		a.LDA_imm8_b(0x08)
 		a.STA_abs(0x010E)
 
-		// loads a dungeon given an entrance ID:
+		// run a frame:
+		runFramePC = a.Label("mainRouting")
+		a.SEP(0x30)
+		a.Comment("JSR ClearOAMBuffer")
+		// ClearOAMBuffer#_00841E
+		a.JSR_abs(0x841E)
 		a.Comment("JSL Module_MainRouting")
 		a.JSL(fastRomBank | 0x00_80B5)
 		a.BRA("updateVRAM")
@@ -1204,8 +1297,17 @@ func setupAlttp(e *System) {
 		// this code sets up the DMA transfer parameters for animated BG tiles:
 		a.Comment("NMI_PrepareSprites")
 		a.JSR_abs(0x85FC)
+
+		// real NMI starts here:
+		nmiRoutinePC = a.Label("NMIRoutine")
+		a.Comment("prepare for PPU writes")
+		a.LDA_imm8_b(0x80)
+		a.STA_abs(0x2100) // INIDISP
+		a.STZ_abs(0x420C) // HDMAEN
 		a.Comment("NMI_DoUpdates")
-		a.JSR_abs(0x89E0) // NMI_DoUpdates
+		a.JSR_abs(0x89E0)
+		a.Comment("NMI_ReadJoypads")
+		a.JSR_abs(0x83D1)
 
 		// WDM triggers an abort for values >= 10
 		donePC = a.Label("done")
@@ -1286,17 +1388,19 @@ func setupAlttp(e *System) {
 	}
 
 	{
-		// emit into our custom $00:5300 routine:
+		// emit into our custom $00:5400 routine:
 		a = asm.NewEmitter(e.HWIO.Dyn[b00RunSingleFramePC&0xFFFF-0x5000:], true)
 		a.SetBase(b00RunSingleFramePC)
 
 		a.SEP(0x30)
 
 		//a.Label("continue_submodule")
+		a.Comment("JSR ClearOAMBuffer")
+		// ClearOAMBuffer#_00841E
+		a.JSR_abs(0x841E)
 		a.Comment("JSL Module_MainRouting")
 		a.JSL(fastRomBank | 0x00_80B5)
 
-		a.Label("no_submodule")
 		// this code sets up the DMA transfer parameters for animated BG tiles:
 		a.Comment("NMI_PrepareSprites")
 		a.JSR_abs(0x85FC)
@@ -1344,16 +1448,36 @@ func setupAlttp(e *System) {
 		a.WriteTextTo(e.Logger)
 	}
 
+	{
+		// patch out Sprite_PrepOAMCoord to not disable offscreen sprites.
+		// Sprite_PrepOAMCoord_disable#_06E48B: INC.w $0F00,X  (INC,X = $FE)
+		// to                                   STZ.w $0F00,X  (STZ,X = $9E)
+		a = newEmitterAt(e, fastRomBank|0x06_E48B, true)
+		a.STZ_abs_x(0x0F00)
+		a.WriteTextTo(e.Logger)
+	}
+
+	{
+		// patch out LoadSongBank#_008888
+		a = newEmitterAt(e, fastRomBank|0x00_8888, true)
+		a.RTS()
+		a.WriteTextTo(e.Logger)
+	}
+
 	//e.LoggerCPU = os.Stdout
 	_ = loadSupertilePC
 
-	// run the initialization code:
-	//e.LoggerCPU = os.Stdout
-	if err = e.ExecAt(0x00_5000, donePC); err != nil {
-		panic(err)
+	{
+		// run the initialization code:
+		//e.LoggerCPU = os.Stdout
+		if err = e.ExecAt(0x00_5000, donePC); err != nil {
+			panic(err)
+		}
+		//e.LoggerCPU = nil
+
+		write16(e.WRAM[:], 0x0ADC, 0xA680)
+		write16(e.WRAM[:], 0xC00D, 0x0001)
 	}
-	//e.LoggerCPU = nil
-	//os.Exit(0)
 
 	return
 }
@@ -1364,8 +1488,6 @@ func newEmitterAt(s *System, addr uint32, generateText bool) *asm.Emitter {
 	a.SetBase(addr)
 	return a
 }
-
-type empty = struct{}
 
 type Entrance struct {
 	EntranceID uint8
