@@ -629,6 +629,31 @@ func (room *RoomState) Init(ep EntryPoint) (err error) {
 	// dump enemy state:
 	//fmt.Println(hex.Dump(wram[0x0D00:0x0FA0]))
 
+	// place Link at the entrypoint:
+	{
+		linkX, linkY := ep.Point.ToAbsCoord(st)
+		// nudge link within visible bounds:
+		if linkX&0x1FF < 0x20 {
+			linkX += 0x20
+		}
+		if linkX&0x1FF > 0x1E0 {
+			linkX -= 0x20
+		}
+		if linkY&0x1FF < 0x20 {
+			linkY += 0x20
+		}
+		if linkY&0x1FF > 0x1E0 {
+			linkY -= 0x20
+		}
+		linkY += 14
+		write16(wram, 0x22, linkX)
+		write16(wram, 0x20, linkY)
+
+		// ensure link on screen:
+		write16(wram, 0x00E2, uint16(int(linkX)-0x40))
+		write16(wram, 0x00E8, uint16(int(linkY)-0x40))
+	}
+
 	// capture first room state:
 	room.DrawSupertile()
 

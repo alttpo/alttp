@@ -442,27 +442,6 @@ func (room *RoomState) DrawSupertile() {
 		// reset WRAM to initial supertile load:
 		room.WRAM = room.WRAMAfterLoaded
 
-		// place Link at the entrypoint:
-		if false {
-			linkX, linkY := room.EntryPoints[0].Point.ToAbsCoord(room.Supertile)
-			// nudge link within visible bounds:
-			if linkX&0x1FF < 0x20 {
-				linkX += 0x20
-			}
-			if linkX&0x1FF > 0x1E0 {
-				linkX -= 0x20
-			}
-			if linkY&0x1FF < 0x20 {
-				linkY += 0x20
-			}
-			if linkY&0x1FF > 0x1E0 {
-				linkY -= 0x20
-			}
-			linkY += 14
-			write16(wram, 0x22, linkX)
-			write16(wram, 0x20, linkY)
-		}
-
 		if oopsAll >= 0 {
 			// replace all enemy sprites with this sprite ID:
 		sprLoop:
@@ -488,9 +467,14 @@ func (room *RoomState) DrawSupertile() {
 			}
 		}
 
-		for i := 0; i < 2; i++ {
+		// run a few frames:
+		for i := 0; i < 16; i++ {
 			if err := room.e.ExecAtUntil(b00RunSingleFramePC, 0, 0x200000); err != nil {
 				fmt.Fprintln(os.Stderr, err)
+				break
+			}
+
+			if room.e.Bus.Read8(0x7E0010) == 0x07 && room.e.Bus.Read8(0x7E0011) == 0x00 {
 				break
 			}
 		}
@@ -608,16 +592,6 @@ func drawCircle(img draw.Image, x0, y0, r int, c color.Color) {
 	}
 }
 
-func newAlphaFilled(bounds image.Rectangle, c color.Alpha) *image.Alpha {
-	a := image.NewAlpha(bounds)
-	for y := 0; y < bounds.Dy(); y++ {
-		for x := 0; x < bounds.Dx(); x++ {
-			a.SetAlpha(x, y, c)
-		}
-	}
-	return a
-}
-
 type filledCircleMask struct {
 	p image.Point
 	r int
@@ -651,6 +625,8 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 	red := image.NewUniform(color.RGBA{255, 48, 48, 255})
 	alpha := color.Alpha{60}
 	alphaU := image.NewUniform(alpha)
+
+	roomX, roomY := room.Supertile.AbsTopLeft()
 
 	// draw sprites:
 	for i := uint32(0); i < 16; i++ {
@@ -717,36 +693,153 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 
 		switch et {
 		case 0x7E, 0x7F: // fire bar
-			// fill circle:
-			draw.DrawMask(
-				shapesC,
-				shapesC.Bounds(),
-				clr,
-				image.Point{},
-				&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
-				image.Point{},
-				draw.Over,
-			)
-			draw.DrawMask(
-				shapesA,
-				shapesA.Bounds(),
-				alphaU,
-				image.Point{},
-				&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
-				image.Point{},
-				draw.Over,
-			)
+			if true {
+				e := System{}
+				_ = e.InitEmulatorFrom(&room.e)
+				//e.LoggerCPU = os.Stdout
 
-			// outline circle:
-			//drawCircle(shapesC, lx+hbW/2, ly+hbH/2, 16*5-12, clr)
-			//drawCircle(shapesA, lx+hbW/2, ly+hbH/2, 16*5-12, alpha)
-			//draw.Draw(
-			//	shapesC,
-			//	image.Rect(lx, ly, lx+hbW+1, ly+hbH+1),
-			//	alpha,
-			//	image.Point{},
-			//	draw.Over,
-			//)
+				// set data bank:
+				e.CPU.RDBR = 0x06
+
+				e.OnPC = make(map[uint32]func())
+				e.OnPC[0x1ED185|fastRomBank] = func() {
+					fmt.Println("next_segment")
+				}
+				e.OnPC[0x06F425|fastRomBank] = func() {
+					fmt.Println("_06F425")
+				}
+
+				// clear i-frames and invuln:
+				e.WRAM[0x031F] = 0
+				e.WRAM[0x037B] = 0
+
+				for j := 0; j < 0x80; j++ {
+					e.WRAM[0x0800+(j<<2)+0] = 0
+					e.WRAM[0x0800+(j<<2)+1] = 0xF0
+					e.WRAM[0x0800+(j<<2)+2] = 0
+					e.WRAM[0x0800+(j<<2)+3] = 0
+				}
+
+				// find quadrant top-left x,y:
+				//quadX := roomX + ((x - roomX) & ^uint16(0x7F))
+				//quadY := roomY + ((y - roomY) & ^uint16(0x7F))
+				quadX := x - 0x80
+				quadY := y - 0x80
+
+				// ensure sprite on screen:
+				e.Bus.Write16(0x7E00E2, quadX)
+				e.Bus.Write16(0x7E00E8, quadY)
+				// set link x/y coords for collision detection:
+				e.Bus.Write16(0x7E0022, uint16(int(x))) // X
+				e.Bus.Write16(0x7E0020, uint16(int(y))) // Y
+
+				// execute Sprite_Main up until `LDX #$0F` which begins sprite_executesingle loop:
+				if err := e.ExecAtUntil(0x068328, 0x06839F, 0x200000); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					break
+				}
+
+				// rotate firebar all the way around and render its hitboxes:
+				for a := uint16(0); a < 0x200; a += 2 {
+					// set firebar angle:
+					e.WRAM[0x0D90+i] = uint8(a & 0xFF)
+					e.WRAM[0x0DA0+i] = uint8((a >> 8) & 0xFF)
+
+					snapshot := e.WRAM
+
+					// 0x0684DD // JSR Sprite_ExecuteSingle with X=sprite slot
+					spriteExecuteSingle := 0x0683A4 | fastRomBank
+
+					// set link x/y coords for collision detection:
+					//e.Bus.Write16(0x7E0022, uint16(int(x)+ox)) // X
+					//e.Bus.Write16(0x7E0020, uint16(int(y)+oy)) // Y
+					// set X register to sprite slot:
+					e.Bus.Write16(0x7E0FA0, uint16(i))
+					e.CPU.RX = uint16(i)
+					e.CPU.RXl = uint8(i)
+					// 8 bit mode:
+					e.CPU.M = 1
+					e.CPU.X = 1
+
+					// execute logic for the sprite:
+					if err := e.ExecAtUntil(spriteExecuteSingle, spriteExecuteSingle+3, 0x200000); err != nil {
+						fmt.Fprintln(os.Stderr, err)
+						break
+					}
+
+					// render rough hitboxes from OAM:
+					for j := 0; j < 0x80; j++ {
+						sy := int(e.WRAM[0x800+(j<<2)+1])
+						if sy >= 0xF0 {
+							continue
+						}
+
+						sx := int(e.WRAM[0x800+(j<<2)+0])
+						// use the extra table for X high bit
+						if e.WRAM[0x0A20+j]&1 != 0 {
+							sx = int(^uint8(sx)) + 1 - 512
+						}
+
+						ax := (sx + int(quadX)) - int(roomX)
+						ay := (sy + int(quadY)) - int(roomY)
+
+						rect := image.Rect(
+							ax,
+							ay,
+							ax+0x18,
+							ay+0x10,
+						)
+						draw.Draw(
+							shapesC,
+							rect,
+							clr,
+							image.Point{},
+							draw.Src,
+						)
+						draw.Draw(
+							shapesA,
+							rect,
+							alphaU,
+							image.Point{},
+							draw.Src,
+						)
+					}
+
+					// restore WRAM:
+					e.WRAM = snapshot
+				}
+			} else {
+				// fill circle:
+				draw.DrawMask(
+					shapesC,
+					shapesC.Bounds(),
+					clr,
+					image.Point{},
+					&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
+					image.Point{},
+					draw.Over,
+				)
+				draw.DrawMask(
+					shapesA,
+					shapesA.Bounds(),
+					alphaU,
+					image.Point{},
+					&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
+					image.Point{},
+					draw.Over,
+				)
+
+				// outline circle:
+				//drawCircle(shapesC, lx+hbW/2, ly+hbH/2, 16*5-12, clr)
+				//drawCircle(shapesA, lx+hbW/2, ly+hbH/2, 16*5-12, alpha)
+				//draw.Draw(
+				//	shapesC,
+				//	image.Rect(lx, ly, lx+hbW+1, ly+hbH+1),
+				//	alpha,
+				//	image.Point{},
+				//	draw.Over,
+				//)
+			}
 			break
 		default:
 			if true {
