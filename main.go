@@ -15,6 +15,7 @@ import (
 	"image/gif"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -388,8 +389,8 @@ func main() {
 
 	// run generic processing jobs on all supertiles:
 	if true {
-		//n := runtime.NumCPU()
-		n := 1
+		n := runtime.NumCPU()
+		//n := 1
 		jobs := make(chan func(), n)
 		for i := 0; i < n; i++ {
 			go func() {
@@ -442,7 +443,7 @@ func main() {
 					}
 				}()
 
-				fmt.Printf("init room %s\n", room.Supertile)
+				fmt.Printf("process room %s\n", room.Supertile)
 				processRoom(room, &e, roomFn)
 				wg.Done()
 			}

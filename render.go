@@ -707,56 +707,48 @@ func (c *filledCircleMask) At(x, y int) color.Color {
 func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 	wram := (&room.WRAM)[:]
 
-	shapesC := image.NewRGBA(g.Bounds())
-	shapesA := image.NewAlpha(g.Bounds())
-
 	//black := image.NewUniform(color.RGBA{0, 0, 0, 255})
 	yellow := image.NewUniform(color.RGBA{255, 255, 0, 255})
-	red := image.NewUniform(color.RGBA{255, 48, 48, 255})
+	//red := image.NewUniform(color.RGBA{255, 48, 48, 255})
 	alpha := color.Alpha{60}
 	alphaU := image.NewUniform(alpha)
 
 	roomX, roomY := room.Supertile.AbsTopLeft()
 
-	// draw sprites:
-	for i := uint32(0); i < 16; i++ {
-		clr := yellow
-
-		// Initial AI state on load:
-		//initialAIState := read8(room.WRAMAfterLoaded[:], 0x0DD0+i)
-		//if initialAIState == 0 {
-		//	// nothing was ever here:
-		//	continue
-		//}
-
-		// determine if in bounds:
+	getXY := func(i uint32, wram []byte) (x, y uint16) {
 		yl, yh := read8(wram, 0x0D00+i), read8(wram, 0x0D20+i)
 		xl, xh := read8(wram, 0x0D10+i), read8(wram, 0x0D30+i)
-		y := uint16(yl) | uint16(yh)<<8
-		x := uint16(xl) | uint16(xh)<<8
-		if !room.IsAbsInBounds(x, y) {
+		y = uint16(yl) | uint16(yh)<<8
+		x = uint16(xl) | uint16(xh)<<8
+		return
+	}
+	getHitBox := func(i uint32, wram []byte) (x, y, w, h int) {
+		// hitbox:
+		hb := uint32(read8(wram, 0x0F60+i) & 0x1F)
+
+		// find hitbox coords:
+		x = int(int8(room.e.Bus.Read8(0x06F735 + hb)))
+		w = int(int8(room.e.Bus.Read8(0x06F775 + hb)))
+		y = int(int8(room.e.Bus.Read8(0x06F795 + hb)))
+		h = int(int8(room.e.Bus.Read8(0x06F7D5 + hb)))
+
+		return
+	}
+
+	// draw sprites:
+	for i := uint32(0); i < 16; i++ {
+		// AI state:
+		st := read8(wram, 0x0DD0+i)
+		if st == 0 {
 			continue
 		}
 
-		// AI state:
-		st := read8(wram, 0x0DD0+i)
+		clr := yellow
 
-		var lx, ly int
-		lx = int(x) & 0x1FF
-		ly = int(y) & 0x1FF
-
-		//fmt.Printf(
-		//	"%02x @ abs(%04x, %04x) -> map(%04x, %04x)\n",
-		//	et,
-		//	x,
-		//	y,
-		//	col,
-		//	row,
-		//)
-
-		if st == 0 {
-			// dead:
-			clr = red
+		// determine if in bounds:
+		x, y := getXY(i, wram)
+		if !room.IsAbsInBounds(x, y) {
+			continue
 		}
 
 		//enemy type:
@@ -769,84 +761,22 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 		//	Dot:  fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)},
 		//}).DrawString(fmt.Sprintf("%02x", et))
 
-		// hitbox:
-		hb := uint32(read8(wram, 0x0F60+i) & 0x1F)
+		// find quadrant top-left x,y:
+		//bgX := roomX + ((x - roomX) & ^uint16(0x7F))
+		//bgY := roomY + ((y - roomY) & ^uint16(0x7F))
 
-		// find hitbox coords:
-		hbX := int(int8(room.e.Bus.Read8(0x06F735 + hb)))
-		hbW := int(int8(room.e.Bus.Read8(0x06F775 + hb)))
-		hbY := int(int8(room.e.Bus.Read8(0x06F795 + hb)))
-		hbH := int(int8(room.e.Bus.Read8(0x06F7D5 + hb)))
+		bgX := x - 0x80
+		bgY := y - 0x80
 
-		lx = lx + hbX
-		ly = ly + hbY
+		c := image.NewRGBA(g.Bounds())
+		a := image.NewAlpha(g.Bounds())
 
-		switch et {
-		case 0x7E, 0x7F: // fire bar
-			if true {
-				e := System{}
-				_ = e.InitEmulatorFrom(&room.e)
-				//e.LoggerCPU = os.Stdout
+		if isPeriodicEnemy(et) {
+			var renderHitBoxes func(e *System) bool
 
-				snapshot := e.WRAM
-
-				// set data bank:
-				e.CPU.RDBR = 0x06
-
-				// clear i-frames and invuln:
-				e.WRAM[0x031F] = 0
-				e.WRAM[0x037B] = 0
-
-				for j := 0; j < 0x80; j++ {
-					e.WRAM[0x0800+(j<<2)+0] = 0
-					e.WRAM[0x0800+(j<<2)+1] = 0xF0
-					e.WRAM[0x0800+(j<<2)+2] = 0
-					e.WRAM[0x0800+(j<<2)+3] = 0
-					e.WRAM[0x0A20+j] = 0
-				}
-
-				// find quadrant top-left x,y:
-				//bgX := roomX + ((x - roomX) & ^uint16(0x7F))
-				//bgY := roomY + ((y - roomY) & ^uint16(0x7F))
-				bgX := x - 0x80
-				bgY := y - 0x80
-
-				// ensure sprite on screen:
-				e.Bus.Write16(0x7E00E2, bgX)
-				e.Bus.Write16(0x7E00E8, bgY)
-				// set link x/y coords for collision detection:
-				e.Bus.Write16(0x7E0022, uint16(int(x))) // X
-				e.Bus.Write16(0x7E0020, uint16(int(y))) // Y
-
-				// execute Sprite_Main up until `LDX #$0F` which begins sprite_executesingle loop:
-				if err := e.ExecAtUntil(0x068328, 0x06839F, 0x200000); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					break
-				}
-
-				// rotate firebar all the way around and render its hitboxes:
-				for a := uint16(0); a < 0x200; a++ {
-					// set firebar angle:
-					//e.WRAM[0x0D90+i] = uint8(a & 0xFF)
-					//e.WRAM[0x0DA0+i] = uint8((a >> 8) & 0xFF)
-
-					// 0x0684DD // JSR Sprite_ExecuteSingle with X=sprite slot
-					spriteExecuteSingle := 0x0683A4 | fastRomBank
-
-					// set X register to sprite slot:
-					e.Bus.Write16(0x7E0FA0, uint16(i))
-					e.CPU.RX = uint16(i)
-					e.CPU.RXl = uint8(i)
-					// 8 bit mode:
-					e.CPU.M = 1
-					e.CPU.X = 1
-
-					// execute logic for the sprite:
-					if err := e.ExecAtUntil(spriteExecuteSingle, spriteExecuteSingle+3, 0x200000); err != nil {
-						fmt.Fprintln(os.Stderr, err)
-						break
-					}
-
+			switch et {
+			case 0x7E, 0x7F: // fire bar
+				renderHitBoxes = func(e *System) bool {
 					// render rough hitboxes from OAM:
 					for j := 0; j < 0x80; j++ {
 						sy := int(e.WRAM[0x800+(j<<2)+1])
@@ -870,84 +800,203 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 							ay+0x10,
 						)
 						draw.Draw(
-							shapesC,
+							c,
 							rect,
 							clr,
 							image.Point{},
 							draw.Src,
 						)
 						draw.Draw(
-							shapesA,
+							a,
 							rect,
 							alphaU,
 							image.Point{},
 							draw.Src,
 						)
 					}
+					return true
+				}
+				break
+			default:
+				renderHitBoxes = func(e *System) bool {
+					wram := e.WRAM[:]
 
-					// restore WRAM:
-					//e.WRAM = snapshot
+					// AI state:
+					st := read8(wram, 0x0DD0+i)
+					if st == 0 {
+						return false
+					}
+
+					// determine if in bounds:
+					x, y := getXY(i, wram)
+					if !room.IsAbsInBounds(x, y) {
+						return true
+					}
+
+					// hitbox:
+					hbX, hbY, hbW, hbH := getHitBox(i, wram)
+
+					// screen coords:
+					lx := (int(x) & 0x1FF) + hbX
+					ly := (int(y) & 0x1FF) + hbY
+
+					// fill:
+					draw.Draw(c, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), clr, image.Point{}, draw.Src)
+					draw.Draw(a, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), alphaU, image.Point{}, draw.Src)
+
+					return true
+				}
+				break
+			}
+
+			e := System{}
+			_ = e.InitEmulatorFrom(&room.e)
+			//e.LoggerCPU = os.Stdout
+
+			snapshot := e.WRAM
+
+			// set data bank:
+			e.CPU.RDBR = 0x06
+
+			// clear i-frames and invuln:
+			e.WRAM[0x031F] = 0
+			e.WRAM[0x037B] = 0
+
+			for j := 0; j < 0x80; j++ {
+				e.WRAM[0x0800+(j<<2)+0] = 0
+				e.WRAM[0x0800+(j<<2)+1] = 0xF0
+				e.WRAM[0x0800+(j<<2)+2] = 0
+				e.WRAM[0x0800+(j<<2)+3] = 0
+				e.WRAM[0x0A20+j] = 0
+			}
+
+			// ensure sprite on screen:
+			e.Bus.Write16(0x7E00E2, bgX)
+			e.Bus.Write16(0x7E00E8, bgY)
+			// set link x/y coords for collision detection:
+			e.Bus.Write16(0x7E0022, uint16(int(x))) // X
+			e.Bus.Write16(0x7E0020, uint16(int(y))) // Y
+
+			// execute Sprite_Main up until `LDX #$0F` which begins sprite_executesingle loop:
+			if err := e.ExecAtUntil(0x068328, 0x06839F, 0x200000); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				break
+			}
+
+			// run through lots of frames and execute sprite logic for the given sprite:
+			for a := uint16(0); a < 0x200; a++ {
+				// set X register to sprite slot:
+				e.Bus.Write16(0x7E0FA0, uint16(i))
+				e.CPU.RX = uint16(i)
+				e.CPU.RXl = uint8(i)
+				// 8 bit mode:
+				e.CPU.M = 1
+				e.CPU.X = 1
+
+				// 0x0684DD // JSR Sprite_ExecuteSingle with X=sprite slot
+				spriteExecuteSingle := 0x0683A4 | fastRomBank
+
+				// execute logic for the sprite:
+				if err := e.ExecAtUntil(spriteExecuteSingle, spriteExecuteSingle+3, 0x200000); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					break
 				}
 
-				e.WRAM = snapshot
-			} else {
-				// fill circle:
-				draw.DrawMask(
-					shapesC,
-					shapesC.Bounds(),
-					clr,
-					image.Point{},
-					&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
-					image.Point{},
-					draw.Over,
-				)
-				draw.DrawMask(
-					shapesA,
-					shapesA.Bounds(),
-					alphaU,
-					image.Point{},
-					&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
-					image.Point{},
-					draw.Over,
-				)
-
-				// outline circle:
-				//drawCircle(shapesC, lx+hbW/2, ly+hbH/2, 16*5-12, clr)
-				//drawCircle(shapesA, lx+hbW/2, ly+hbH/2, 16*5-12, alpha)
-				//draw.Draw(
-				//	shapesC,
-				//	image.Rect(lx, ly, lx+hbW+1, ly+hbH+1),
-				//	alpha,
-				//	image.Point{},
-				//	draw.Over,
-				//)
+				if !renderHitBoxes(&e) {
+					break
+				}
 			}
-			break
-		default:
-			if true {
-				// fill:
-				draw.Draw(shapesC, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), clr, image.Point{}, draw.Over)
-				draw.Draw(shapesA, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), alphaU, image.Point{}, draw.Over)
-			} else {
-				// outline:
-				//draw.Draw(shapesC, image.Rect(lx, ly, lx+hbW, ly+1), alphaU, image.Point{}, draw.Over)
-				//draw.Draw(shapesC, image.Rect(lx+hbW, ly, lx+hbW+1, ly+hbH), alphaU, image.Point{}, draw.Over)
-				//draw.Draw(shapesC, image.Rect(lx, ly+hbH, lx+hbW, ly+hbH+1), alphaU, image.Point{}, draw.Over)
-				//draw.Draw(shapesC, image.Rect(lx, ly, lx+1, ly+hbH+1), alphaU, image.Point{}, draw.Over)
+
+			// restore WRAM:
+			e.WRAM = snapshot
+		} else {
+			// non-periodic enemy:
+
+			// determine if in bounds:
+			x, y := getXY(i, wram)
+			if !room.IsAbsInBounds(x, y) {
+				continue
+			}
+
+			// hitbox:
+			hbX, hbY, hbW, hbH := getHitBox(i, wram)
+
+			// screen coords:
+			lx := (int(x) & 0x1FF) + hbX
+			ly := (int(y) & 0x1FF) + hbY
+
+			switch et {
+			case 0x7E, 0x7F: // fire bar
+				if true {
+					// fill circle:
+					draw.DrawMask(
+						c,
+						c.Bounds(),
+						clr,
+						image.Point{},
+						&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
+						image.Point{},
+						draw.Src,
+					)
+					draw.DrawMask(
+						a,
+						a.Bounds(),
+						alphaU,
+						image.Point{},
+						&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
+						image.Point{},
+						draw.Src,
+					)
+				} else {
+					// outline circle:
+					//drawCircle(shapesC, lx+hbW/2, ly+hbH/2, 16*5-12, clr)
+					//drawCircle(shapesA, lx+hbW/2, ly+hbH/2, 16*5-12, alpha)
+					//draw.Draw(
+					//	shapesC,
+					//	image.Rect(lx, ly, lx+hbW+1, ly+hbH+1),
+					//	alpha,
+					//	image.Point{},
+					//	draw.Over,
+					//)
+				}
+				break
+			default:
+				if true {
+					// fill:
+					draw.Draw(c, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), clr, image.Point{}, draw.Src)
+					draw.Draw(a, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), alphaU, image.Point{}, draw.Src)
+				} else {
+					// outline:
+					//draw.Draw(shapesC, image.Rect(lx, ly, lx+hbW, ly+1), alphaU, image.Point{}, draw.Over)
+					//draw.Draw(shapesC, image.Rect(lx+hbW, ly, lx+hbW+1, ly+hbH), alphaU, image.Point{}, draw.Over)
+					//draw.Draw(shapesC, image.Rect(lx, ly+hbH, lx+hbW, ly+hbH+1), alphaU, image.Point{}, draw.Over)
+					//draw.Draw(shapesC, image.Rect(lx, ly, lx+1, ly+hbH+1), alphaU, image.Point{}, draw.Over)
+				}
 			}
 		}
+
+		// draw the color masked with alpha onto the src:
+		draw.DrawMask(
+			g,
+			g.Bounds(),
+			c,
+			image.Point{},
+			a,
+			image.Point{},
+			draw.Over,
+		)
 	}
 
-	// draw the color masked with alpha onto the src:
-	draw.DrawMask(
-		g,
-		g.Bounds(),
-		shapesC,
-		image.Point{},
-		shapesA,
-		image.Point{},
-		draw.Over,
-	)
+}
+
+func isPeriodicEnemy(et uint8) bool {
+	if et == 0x7E || et == 0x7F { // fire bar
+		return true
+	}
+	if et >= 0x5D && et <= 0x60 { // rollers
+		return true
+	}
+	return false
 }
 
 func (room *RoomState) RenderSprites(g draw.Image) {
