@@ -442,7 +442,7 @@ func main() {
 					}
 				}()
 
-				fmt.Printf("%p\n", room)
+				fmt.Printf("init room %s\n", room.Supertile)
 				processRoom(room, &e, roomFn)
 				wg.Done()
 			}

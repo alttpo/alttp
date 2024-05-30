@@ -788,6 +788,8 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 				_ = e.InitEmulatorFrom(&room.e)
 				//e.LoggerCPU = os.Stdout
 
+				snapshot := e.WRAM
+
 				// set data bank:
 				e.CPU.RDBR = 0x06
 
@@ -804,14 +806,14 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 				}
 
 				// find quadrant top-left x,y:
-				//quadX := roomX + ((x - roomX) & ^uint16(0x7F))
-				//quadY := roomY + ((y - roomY) & ^uint16(0x7F))
-				quadX := x - 0x80
-				quadY := y - 0x80
+				//bgX := roomX + ((x - roomX) & ^uint16(0x7F))
+				//bgY := roomY + ((y - roomY) & ^uint16(0x7F))
+				bgX := x - 0x80
+				bgY := y - 0x80
 
 				// ensure sprite on screen:
-				e.Bus.Write16(0x7E00E2, quadX)
-				e.Bus.Write16(0x7E00E8, quadY)
+				e.Bus.Write16(0x7E00E2, bgX)
+				e.Bus.Write16(0x7E00E8, bgY)
 				// set link x/y coords for collision detection:
 				e.Bus.Write16(0x7E0022, uint16(int(x))) // X
 				e.Bus.Write16(0x7E0020, uint16(int(y))) // Y
@@ -823,19 +825,14 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 				}
 
 				// rotate firebar all the way around and render its hitboxes:
-				for a := uint16(0); a < 0x200; a += 2 {
+				for a := uint16(0); a < 0x200; a++ {
 					// set firebar angle:
-					e.WRAM[0x0D90+i] = uint8(a & 0xFF)
-					e.WRAM[0x0DA0+i] = uint8((a >> 8) & 0xFF)
-
-					snapshot := e.WRAM
+					//e.WRAM[0x0D90+i] = uint8(a & 0xFF)
+					//e.WRAM[0x0DA0+i] = uint8((a >> 8) & 0xFF)
 
 					// 0x0684DD // JSR Sprite_ExecuteSingle with X=sprite slot
 					spriteExecuteSingle := 0x0683A4 | fastRomBank
 
-					// set link x/y coords for collision detection:
-					//e.Bus.Write16(0x7E0022, uint16(int(x)+ox)) // X
-					//e.Bus.Write16(0x7E0020, uint16(int(y)+oy)) // Y
 					// set X register to sprite slot:
 					e.Bus.Write16(0x7E0FA0, uint16(i))
 					e.CPU.RX = uint16(i)
@@ -863,8 +860,8 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 							sx = int(^uint8(sx)) + 1 - 512
 						}
 
-						ax := (sx + int(quadX)) - int(roomX)
-						ay := (sy + int(quadY)) - int(roomY)
+						ax := (sx + int(bgX)) - int(roomX)
+						ay := (sy + int(bgY)) - int(roomY)
 
 						rect := image.Rect(
 							ax,
@@ -889,8 +886,10 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 					}
 
 					// restore WRAM:
-					e.WRAM = snapshot
+					//e.WRAM = snapshot
 				}
+
+				e.WRAM = snapshot
 			} else {
 				// fill circle:
 				draw.DrawMask(
