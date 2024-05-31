@@ -771,6 +771,32 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 		c := image.NewRGBA(g.Bounds())
 		a := image.NewAlpha(g.Bounds())
 
+		drawOAMSprites := func(e *System) {
+			// set data bank:
+			e.CPU.RDBR = 0x00
+
+			// run NMI routine to update VRAM:
+			if err := e.ExecAtUntil(nmiRoutinePC, donePC, 0x200000); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+
+			// restore data bank:
+			e.CPU.RDBR = 0x06
+
+			renderOAMSprites(
+				g,
+				(*[0x100]uint16)(unsafe.Pointer(&e.WRAM[0xC500])),
+				e.VRAM,
+				e.HWIO.PPU.ObjTilemapAddress,
+				e.HWIO.PPU.ObjNamespaceSeparation,
+				(*[0x200]byte)(unsafe.Pointer(&e.WRAM[0x0800])),
+				(*[0x80]byte)(unsafe.Pointer(&e.WRAM[0x0A20])),
+				int(bgX)-int(roomX),
+				int(bgY)-int(roomY),
+			)
+		}
+
 		if isPeriodicEnemy(et) {
 			var renderHitBoxes func(e *System) bool
 
@@ -853,8 +879,6 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 			_ = e.InitEmulatorFrom(&room.e)
 			//e.LoggerCPU = os.Stdout
 
-			snapshot := e.WRAM
-
 			// set data bank:
 			e.CPU.RDBR = 0x06
 
@@ -884,7 +908,7 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 			}
 
 			// run through lots of frames and execute sprite logic for the given sprite:
-			for a := uint16(0); a < 0x200; a++ {
+			for j := uint16(0); j < 0x200; j++ {
 				// set X register to sprite slot:
 				e.Bus.Write16(0x7E0FA0, uint16(i))
 				e.CPU.RX = uint16(i)
@@ -902,13 +926,14 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 					break
 				}
 
+				if j == 0 {
+					drawOAMSprites(&e)
+				}
+
 				if !renderHitBoxes(&e) {
 					break
 				}
 			}
-
-			// restore WRAM:
-			e.WRAM = snapshot
 		} else {
 			// non-periodic enemy:
 
@@ -917,6 +942,8 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 			if !room.IsAbsInBounds(x, y) {
 				continue
 			}
+
+			drawOAMSprites(&room.e)
 
 			// hitbox:
 			hbX, hbY, hbW, hbH := getHitBox(i, wram)
@@ -986,7 +1013,6 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 			draw.Over,
 		)
 	}
-
 }
 
 func isPeriodicEnemy(et uint8) bool {
@@ -997,6 +1023,150 @@ func isPeriodicEnemy(et uint8) bool {
 		return true
 	}
 	return false
+}
+
+func renderOAMSpriteNumbers(g draw.Image, vram *VRAMArray, oam *[0x200]byte, oamx *[0x80]byte, qx int, qy int) {
+	for i := 0; i < 128; i++ {
+		y := int(oam[i<<2+1])
+		if y >= 0xF0 {
+			continue
+		}
+
+		bits := oamx[i] & 3
+
+		var x int
+		if bits&1 != 0 {
+			x = int(^oam[i<<2+0]) + 1 - 512
+		} else {
+			x = int(oam[i<<2+0])
+		}
+
+		t := int(oam[i<<2+2])
+		tn := int(oam[i<<2+3]) & 1
+		fv := oam[i<<2+3]&0x80 != 0
+		fh := oam[i<<2+3]&0x40 != 0
+		pri := oam[i<<2+3] & 0x30 >> 4
+		pal := oam[i<<2+3] & 0xE >> 1
+
+		//ta := room.e.HWIO.PPU.ObjTilemapAddress + uint32(t)*0x20
+		//ta += uint32(tn) * room.e.HWIO.PPU.ObjNamespaceSeparation
+		//ta &= 0xFFFF
+		//room.e.VRAM[ta]
+		drawShadowedString(
+			g,
+			image.White,
+			fixed.Point26_6{X: fixed.I(qx + x), Y: fixed.I(qy + y + 12)},
+			fmt.Sprintf("%03X", t|tn<<8),
+		)
+		_, _, _, _ = fv, fh, pri, pal
+	}
+}
+
+func renderOAMSprites(
+	g draw.Image,
+	cgram *[0x100]uint16,
+	vram *VRAMArray,
+	objTileMapAddress uint32,
+	objNamespaceSeparation uint32,
+	oam *[0x200]byte,
+	oamx *[0x80]byte,
+	qx int,
+	qy int,
+) {
+	for i := 127; i >= 0; i-- {
+		y := int(oam[i<<2+1])
+		if y >= 0xF0 {
+			continue
+		}
+
+		bits := oamx[i] & 3
+
+		var x int
+		if bits&1 != 0 {
+			x = int(^oam[i<<2+0]) + 1 - 512
+		} else {
+			x = int(oam[i<<2+0])
+		}
+
+		// simplification of sprite sizing:
+		var w uint32 = 8
+		var h uint32 = 8
+		if bits&2 != 0 {
+			w = 16
+			h = 16
+		}
+
+		t := int(oam[i<<2+2])
+		tn := int(oam[i<<2+3]) & 1
+		fv := oam[i<<2+3]&0x80 != 0
+		fh := oam[i<<2+3]&0x40 != 0
+		pri := oam[i<<2+3] & 0x30 >> 4
+		pal := oam[i<<2+3] & 0xE >> 1
+
+		tp := objTileMapAddress + uint32(t)*0x20
+		tp += objNamespaceSeparation * uint32(tn)
+		tp &= 0xFFFF
+
+		// 4bpp:
+		for ty := uint32(0); ty < h; ty++ {
+			var fty uint32
+			if fv {
+				// vertical flip:
+				fty = h - 1 - ty
+			} else {
+				fty = ty
+			}
+
+			for tx := uint32(0); tx < w; tx++ {
+				var ftx uint32
+				if fh {
+					// horizontal flip:
+					ftx = w - 1 - tx
+				} else {
+					// normal:
+					ftx = tx
+				}
+
+				// calculate tilemap address:
+				ta := tp + ((ftx >> 3) << 5) + ((fty >> 3) << 9) + ((fty & 7) << 1)
+				// read 4 bytes:
+				d0, d1, d2, d3 := vram[ta+0], vram[ta+1], vram[ta+16], vram[ta+17]
+
+				// calculate bit mask of X:
+				m := uint8(1) << (7 - (ftx & 7))
+
+				// compute 4-bit color index:
+				ci := uint8(0)
+				if d0&m != 0 {
+					ci |= 0b0001
+				}
+				if d1&m != 0 {
+					ci |= 0b0010
+				}
+				if d2&m != 0 {
+					ci |= 0b0100
+				}
+				if d3&m != 0 {
+					ci |= 0b1000
+				}
+
+				if ci == 0 {
+					continue
+				}
+
+				g.Set(qx+x+int(tx), qy+y+int(ty), cgramRGBA(cgram[128+(pal<<4)+ci]))
+			}
+		}
+
+		//drawShadowedString(
+		//	g,
+		//	image.White,
+		//	fixed.Point26_6{X: fixed.I(qx + x), Y: fixed.I(qy + y + 12)},
+		//	fmt.Sprintf("%03X", t|tn<<8),
+		//)
+
+		_ = pri
+	}
 }
 
 func (room *RoomState) RenderSprites(g draw.Image) {
@@ -1298,28 +1468,32 @@ var gammaRamp = [...]uint8{
 	0xc8, 0xd0, 0xd8, 0xe0, 0xe8, 0xf0, 0xf8, 0xff,
 }
 
+func cgramRGBA(bgr15 uint16) color.NRGBA {
+	// convert BGR15 color format (MSB unused) to RGB24:
+	b := (bgr15 & 0x7C00) >> 10
+	g := (bgr15 & 0x03E0) >> 5
+	r := bgr15 & 0x001F
+	if useGammaRamp {
+		return color.NRGBA{
+			R: gammaRamp[r],
+			G: gammaRamp[g],
+			B: gammaRamp[b],
+			A: 0xff,
+		}
+	} else {
+		return color.NRGBA{
+			R: uint8(r<<3 | r>>2),
+			G: uint8(g<<3 | g>>2),
+			B: uint8(b<<3 | b>>2),
+			A: 0xff,
+		}
+	}
+}
+
 func cgramToPalette(cgram []uint16) color.Palette {
 	pal := make(color.Palette, 256)
 	for i, bgr15 := range cgram {
-		// convert BGR15 color format (MSB unused) to RGB24:
-		b := (bgr15 & 0x7C00) >> 10
-		g := (bgr15 & 0x03E0) >> 5
-		r := bgr15 & 0x001F
-		if useGammaRamp {
-			pal[i] = color.NRGBA{
-				R: gammaRamp[r],
-				G: gammaRamp[g],
-				B: gammaRamp[b],
-				A: 0xff,
-			}
-		} else {
-			pal[i] = color.NRGBA{
-				R: uint8(r<<3 | r>>2),
-				G: uint8(g<<3 | g>>2),
-				B: uint8(b<<3 | b>>2),
-				A: 0xff,
-			}
-		}
+		pal[i] = cgramRGBA(bgr15)
 	}
 	return pal
 }

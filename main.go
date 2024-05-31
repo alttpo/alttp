@@ -925,45 +925,6 @@ movement:
 	room.WRAM = room.WRAMAfterLoaded
 }
 
-func renderOAMSprites(g *image.Paletted, wram *WRAMArray, vram *VRAMArray, oam *OAMArray, qx int, qy int) {
-	for i := 0; i < 128; i++ {
-		//fmt.Printf("[%02X,0]: %02X\n", i, oam[i<<2+0])
-		//fmt.Printf("[%02X,1]: %02X\n", i, oam[i<<2+1])
-		//fmt.Printf("[%02X,2]: %02X\n", i, oam[i<<2+2])
-		//fmt.Printf("[%02X,3]: %02X\n", i, oam[i<<2+3])
-		bits := oam[512+(i>>3)] >> ((i & 3) << 1) & 3
-		//fmt.Printf("[%02X,4]: %02X\n", i, bits)
-
-		x := int(oam[i<<2+0]) | ((int(bits) & 1) << 8)
-		y := int(oam[i<<2+1])
-		t := int(oam[i<<2+2])
-		tn := int(oam[i<<2+3]) & 1
-		fv := oam[i<<2+3]&0x80 != 0
-		fh := oam[i<<2+3]&0x40 != 0
-		pri := oam[i<<2+3] & 0x30 >> 4
-		pal := oam[i<<2+3] & 0xE >> 1
-
-		if x >= 256 {
-			x -= 512
-		}
-		if y >= 0xF0 {
-			y -= 0x100
-		}
-
-		//ta := room.e.HWIO.PPU.ObjTilemapAddress + uint32(t)*0x20
-		//ta += uint32(tn) * room.e.HWIO.PPU.ObjNamespaceSeparation
-		//ta &= 0xFFFF
-		//room.e.VRAM[ta]
-		drawShadowedString(
-			g,
-			image.White,
-			fixed.Point26_6{X: fixed.I(qx + x), Y: fixed.I(qy + y + 12)},
-			fmt.Sprintf("%03X", t|tn<<8),
-		)
-		_, _, _, _ = fv, fh, pri, pal
-	}
-}
-
 func renderSpriteLabels(g draw.Image, wram []byte, st Supertile) {
 	//black := image.NewUniform(color.RGBA{0, 0, 0, 255})
 	yellow := image.NewUniform(color.RGBA{255, 255, 0, 255})

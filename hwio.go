@@ -289,8 +289,8 @@ func (h *HWIO) Write(address uint32, value byte) {
 	}
 	if offs == 0x2101 {
 		// OBSEL
-		h.PPU.ObjNamespaceSeparation = uint32(value&0x18) << 9
-		h.PPU.ObjTilemapAddress = uint32(value&0x7) << 13
+		h.PPU.ObjTilemapAddress = uint32(value&0x3) << 14
+		h.PPU.ObjNamespaceSeparation = (uint32(value>>3) & 3) << 13
 		// skip size table
 		return
 	}
