@@ -408,6 +408,7 @@ func main() {
 		}
 
 		st16min, st16max := uint16(0), uint16(0x127)
+		//st16min, st16max := uint16(0x004), uint16(0x004)
 		//st16min, st16max := uint16(0x57), uint16(0x57)
 		//st16min, st16max := uint16(0x12), uint16(0x12)
 

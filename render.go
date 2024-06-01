@@ -737,6 +737,7 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 
 	// draw sprites:
 	for i := uint32(0); i < 16; i++ {
+		i := i
 		// AI state:
 		st := read8(wram, 0x0DD0+i)
 		if st == 0 {
@@ -765,32 +766,20 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 		//bgX := roomX + ((x - roomX) & ^uint16(0x7F))
 		//bgY := roomY + ((y - roomY) & ^uint16(0x7F))
 
-		bgX := x - 0x80
-		bgY := y - 0x80
+		bgX := int(x) - 0x80
+		if bgX < 0 {
+			bgX = 0
+		}
+		bgY := int(y) - 0x80
+		if bgY < 0 {
+			bgY = 0
+		}
 
 		c := image.NewRGBA(g.Bounds())
 		a := image.NewAlpha(g.Bounds())
 
 		drawOAMSprites := func(e *System) {
-			// #_0286BC: JSL Graphics_LoadChrHalfSlot ; #_00E43A
-			// #_0286C0
-			e.CPU.RDBR = 0x02 // TODO: necessary?
-			if err := e.ExecAtUntil(0x0286BC, 0x0286C0, 0x200000); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-
-			// run NMI routine to update VRAM:
-			e.CPU.RDBR = 0x00
-			if err := e.ExecAtUntil(nmiRoutinePC, donePC, 0x200000); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
-
-			// restore original data bank:
-			e.CPU.RDBR = 0x06
-
-			if true {
+			if false {
 				// dump VRAM to a PNG file for debugging:
 				dbg := image.NewRGBA(image.Rect(0, 0, 32*8, 16*8))
 				for tp := uint32(0); tp < uint32(0x4000); tp += 0x20 {
@@ -820,8 +809,8 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 				e.HWIO.PPU.ObjNameSelect,
 				(*[0x200]byte)(unsafe.Pointer(&e.WRAM[0x0800])),
 				(*[0x80]byte)(unsafe.Pointer(&e.WRAM[0x0A20])),
-				int(bgX)-int(roomX),
-				int(bgY)-int(roomY),
+				bgX-int(roomX),
+				bgY-int(roomY),
 			)
 		}
 
@@ -923,8 +912,8 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 			}
 
 			// ensure sprite on screen:
-			e.Bus.Write16(0x7E00E2, bgX)
-			e.Bus.Write16(0x7E00E8, bgY)
+			e.Bus.Write16(0x7E00E2, uint16(bgX))
+			e.Bus.Write16(0x7E00E8, uint16(bgY))
 			// set link x/y coords for collision detection:
 			e.Bus.Write16(0x7E0022, uint16(int(x))) // X
 			e.Bus.Write16(0x7E0020, uint16(int(y))) // Y
