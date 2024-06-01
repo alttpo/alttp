@@ -772,24 +772,52 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 		a := image.NewAlpha(g.Bounds())
 
 		drawOAMSprites := func(e *System) {
-			// set data bank:
-			e.CPU.RDBR = 0x00
+			// #_0286BC: JSL Graphics_LoadChrHalfSlot ; #_00E43A
+			// #_0286C0
+			e.CPU.RDBR = 0x02 // TODO: necessary?
+			if err := e.ExecAtUntil(0x0286BC, 0x0286C0, 0x200000); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
 
 			// run NMI routine to update VRAM:
+			e.CPU.RDBR = 0x00
 			if err := e.ExecAtUntil(nmiRoutinePC, donePC, 0x200000); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return
 			}
 
-			// restore data bank:
+			// restore original data bank:
 			e.CPU.RDBR = 0x06
+
+			if true {
+				// dump VRAM to a PNG file for debugging:
+				dbg := image.NewRGBA(image.Rect(0, 0, 32*8, 16*8))
+				for tp := uint32(0); tp < uint32(0x4000); tp += 0x20 {
+					draw4bppTile(
+						e.VRAM,
+						e.HWIO.PPU.ObjTilemapAddress+tp,
+						8,
+						8,
+						false,
+						false,
+						int(((tp&0x01FF)>>2)+(tp&0xE000)>>6),
+						int((tp&0x1E00)>>6),
+						4,
+						func(x, y int, idx uint8) {
+							dbg.Set(x, y, cgramRGBA((*[0x100]uint16)(unsafe.Pointer(&e.WRAM[0xC500]))[idx]))
+						},
+					)
+				}
+				_ = exportPNG(fmt.Sprintf("vram.%03X.png", uint16(room.Supertile)), dbg)
+			}
 
 			renderOAMSprites(
 				g,
 				(*[0x100]uint16)(unsafe.Pointer(&e.WRAM[0xC500])),
 				e.VRAM,
 				e.HWIO.PPU.ObjTilemapAddress,
-				e.HWIO.PPU.ObjNamespaceSeparation,
+				e.HWIO.PPU.ObjNameSelect,
 				(*[0x200]byte)(unsafe.Pointer(&e.WRAM[0x0800])),
 				(*[0x80]byte)(unsafe.Pointer(&e.WRAM[0x0A20])),
 				int(bgX)-int(roomX),
@@ -797,7 +825,7 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 			)
 		}
 
-		if isPeriodicEnemy(et) {
+		{
 			var renderHitBoxes func(e *System) bool
 
 			switch et {
@@ -907,8 +935,13 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 				break
 			}
 
+			frameCount := uint16(1)
+			if isPeriodicEnemy(et) {
+				frameCount = 0x200
+			}
+
 			// run through lots of frames and execute sprite logic for the given sprite:
-			for j := uint16(0); j < 0x200; j++ {
+			for j := uint16(0); j < frameCount; j++ {
 				// set X register to sprite slot:
 				e.Bus.Write16(0x7E0FA0, uint16(i))
 				e.CPU.RX = uint16(i)
@@ -932,72 +965,6 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 
 				if !renderHitBoxes(&e) {
 					break
-				}
-			}
-		} else {
-			// non-periodic enemy:
-
-			// determine if in bounds:
-			x, y := getXY(i, wram)
-			if !room.IsAbsInBounds(x, y) {
-				continue
-			}
-
-			drawOAMSprites(&room.e)
-
-			// hitbox:
-			hbX, hbY, hbW, hbH := getHitBox(i, wram)
-
-			// screen coords:
-			lx := (int(x) & 0x1FF) + hbX
-			ly := (int(y) & 0x1FF) + hbY
-
-			switch et {
-			case 0x7E, 0x7F: // fire bar
-				if true {
-					// fill circle:
-					draw.DrawMask(
-						c,
-						c.Bounds(),
-						clr,
-						image.Point{},
-						&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
-						image.Point{},
-						draw.Src,
-					)
-					draw.DrawMask(
-						a,
-						a.Bounds(),
-						alphaU,
-						image.Point{},
-						&filledCircleMask{image.Point{lx + hbW/2, ly + hbH/2}, 16*5 - 12, color.Alpha{255}},
-						image.Point{},
-						draw.Src,
-					)
-				} else {
-					// outline circle:
-					//drawCircle(shapesC, lx+hbW/2, ly+hbH/2, 16*5-12, clr)
-					//drawCircle(shapesA, lx+hbW/2, ly+hbH/2, 16*5-12, alpha)
-					//draw.Draw(
-					//	shapesC,
-					//	image.Rect(lx, ly, lx+hbW+1, ly+hbH+1),
-					//	alpha,
-					//	image.Point{},
-					//	draw.Over,
-					//)
-				}
-				break
-			default:
-				if true {
-					// fill:
-					draw.Draw(c, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), clr, image.Point{}, draw.Src)
-					draw.Draw(a, image.Rect(lx, ly, lx+hbW+1, ly+hbH+1), alphaU, image.Point{}, draw.Src)
-				} else {
-					// outline:
-					//draw.Draw(shapesC, image.Rect(lx, ly, lx+hbW, ly+1), alphaU, image.Point{}, draw.Over)
-					//draw.Draw(shapesC, image.Rect(lx+hbW, ly, lx+hbW+1, ly+hbH), alphaU, image.Point{}, draw.Over)
-					//draw.Draw(shapesC, image.Rect(lx, ly+hbH, lx+hbW, ly+hbH+1), alphaU, image.Point{}, draw.Over)
-					//draw.Draw(shapesC, image.Rect(lx, ly, lx+1, ly+hbH+1), alphaU, image.Point{}, draw.Over)
 				}
 			}
 		}
@@ -1049,7 +1016,7 @@ func renderOAMSpriteNumbers(g draw.Image, vram *VRAMArray, oam *[0x200]byte, oam
 		pal := oam[i<<2+3] & 0xE >> 1
 
 		//ta := room.e.HWIO.PPU.ObjTilemapAddress + uint32(t)*0x20
-		//ta += uint32(tn) * room.e.HWIO.PPU.ObjNamespaceSeparation
+		//ta += uint32(tn) * room.e.HWIO.PPU.ObjNameSelect
 		//ta &= 0xFFFF
 		//room.e.VRAM[ta]
 		drawShadowedString(
@@ -1067,12 +1034,16 @@ func renderOAMSprites(
 	cgram *[0x100]uint16,
 	vram *VRAMArray,
 	objTileMapAddress uint32,
-	objNamespaceSeparation uint32,
+	objNameSelect uint32,
 	oam *[0x200]byte,
 	oamx *[0x80]byte,
 	qx int,
 	qy int,
 ) {
+	setPx := func(x, y int, idx uint8) {
+		g.Set(x, y, cgramRGBA(cgram[idx]))
+	}
+
 	for i := 127; i >= 0; i-- {
 		y := int(oam[i<<2+1])
 		if y >= 0xF0 {
@@ -1104,59 +1075,10 @@ func renderOAMSprites(
 		pal := oam[i<<2+3] & 0xE >> 1
 
 		tp := objTileMapAddress + uint32(t)*0x20
-		tp += objNamespaceSeparation * uint32(tn)
+		tp += objNameSelect * uint32(tn)
 		tp &= 0xFFFF
 
-		// 4bpp:
-		for ty := uint32(0); ty < h; ty++ {
-			var fty uint32
-			if fv {
-				// vertical flip:
-				fty = h - 1 - ty
-			} else {
-				fty = ty
-			}
-
-			for tx := uint32(0); tx < w; tx++ {
-				var ftx uint32
-				if fh {
-					// horizontal flip:
-					ftx = w - 1 - tx
-				} else {
-					// normal:
-					ftx = tx
-				}
-
-				// calculate tilemap address:
-				ta := tp + ((ftx >> 3) << 5) + ((fty >> 3) << 9) + ((fty & 7) << 1)
-				// read 4 bytes:
-				d0, d1, d2, d3 := vram[ta+0], vram[ta+1], vram[ta+16], vram[ta+17]
-
-				// calculate bit mask of X:
-				m := uint8(1) << (7 - (ftx & 7))
-
-				// compute 4-bit color index:
-				ci := uint8(0)
-				if d0&m != 0 {
-					ci |= 0b0001
-				}
-				if d1&m != 0 {
-					ci |= 0b0010
-				}
-				if d2&m != 0 {
-					ci |= 0b0100
-				}
-				if d3&m != 0 {
-					ci |= 0b1000
-				}
-
-				if ci == 0 {
-					continue
-				}
-
-				g.Set(qx+x+int(tx), qy+y+int(ty), cgramRGBA(cgram[128+(pal<<4)+ci]))
-			}
-		}
+		draw4bppTile(vram, tp, w, h, fh, fv, qx+x, qy+y, pal, setPx)
 
 		//drawShadowedString(
 		//	g,
@@ -1166,6 +1088,70 @@ func renderOAMSprites(
 		//)
 
 		_ = pri
+	}
+}
+
+func draw4bppTile(
+	vram *VRAMArray,
+	tp uint32,
+	w uint32,
+	h uint32,
+	fh bool,
+	fv bool,
+	x int,
+	y int,
+	pal byte,
+	setPx func(x, y int, idx uint8),
+) {
+	// 4bpp:
+	for ty := uint32(0); ty < h; ty++ {
+		var fty uint32
+		if fv {
+			// vertical flip:
+			fty = h - 1 - ty
+		} else {
+			fty = ty
+		}
+
+		for tx := uint32(0); tx < w; tx++ {
+			var ftx uint32
+			if fh {
+				// horizontal flip:
+				ftx = w - 1 - tx
+			} else {
+				// normal:
+				ftx = tx
+			}
+
+			// calculate tilemap address:
+			ta := tp + ((ftx >> 3) << 5) + ((fty >> 3) << 9) + ((fty & 7) << 1)
+			// read 4 bytes:
+			d0, d1, d2, d3 := vram[ta+0], vram[ta+1], vram[ta+16], vram[ta+17]
+
+			// calculate bit mask of X:
+			m := uint8(1) << (7 - (ftx & 7))
+
+			// compute 4-bit color index:
+			ci := uint8(0)
+			if d0&m != 0 {
+				ci |= 0b0001
+			}
+			if d1&m != 0 {
+				ci |= 0b0010
+			}
+			if d2&m != 0 {
+				ci |= 0b0100
+			}
+			if d3&m != 0 {
+				ci |= 0b1000
+			}
+
+			if ci == 0 {
+				continue
+			}
+
+			setPx(x+int(tx), y+int(ty), 128+(pal<<4)+ci)
+		}
 	}
 }
 

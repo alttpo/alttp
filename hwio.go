@@ -116,9 +116,9 @@ type HWIO struct {
 		addrRemapping byte
 		addr          uint16
 
-		oamadd                 uint16
-		ObjTilemapAddress      uint32
-		ObjNamespaceSeparation uint32
+		oamadd            uint16
+		ObjTilemapAddress uint32
+		ObjNameSelect     uint32
 	}
 
 	APU struct {
@@ -290,7 +290,7 @@ func (h *HWIO) Write(address uint32, value byte) {
 	if offs == 0x2101 {
 		// OBSEL
 		h.PPU.ObjTilemapAddress = uint32(value&0x3) << 14
-		h.PPU.ObjNamespaceSeparation = (uint32(value>>3) & 3) << 13
+		h.PPU.ObjNameSelect = ((uint32(value>>3) & 3) + 1) << 13
 		// skip size table
 		return
 	}
