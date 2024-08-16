@@ -833,10 +833,10 @@ func renderEnemyMovementGif(room *RoomState) {
 			}
 		}
 
-		lastFrame = g
-		room.EnemyMovementGIF.Image = append(room.EnemyMovementGIF.Image, g)
-		room.EnemyMovementGIF.Delay = append(room.EnemyMovementGIF.Delay, 20)
-		room.EnemyMovementGIF.Disposal = append(room.EnemyMovementGIF.Disposal, gif.DisposalNone)
+		// lastFrame = g
+		// room.EnemyMovementGIF.Image = append(room.EnemyMovementGIF.Image, g)
+		// room.EnemyMovementGIF.Delay = append(room.EnemyMovementGIF.Delay, 20)
+		// room.EnemyMovementGIF.Disposal = append(room.EnemyMovementGIF.Disposal, gif.DisposalNone)
 		room.EnemyMovementGIF.LoopCount = 0
 		room.EnemyMovementGIF.BackgroundIndex = 0
 	}
@@ -968,7 +968,7 @@ movement:
 		}
 
 		// compose all layers to single image:
-		fmt.Printf("%v: TM=%08b,TS=%08b,WS=%08b,AS=%08b\n", room.Supertile, ppu.TM, ppu.TS, ppu.CGWSEL, ppu.CGADDSUB)
+		// fmt.Printf("%v: TM=%08b,TS=%08b,WS=%08b,AS=%08b\n", room.Supertile, ppu.TM, ppu.TS, ppu.CGWSEL, ppu.CGADDSUB)
 		ComposePrioritizedToPaletted(g, pal, bg1p, bg2p, obj, ppu)
 
 		// render frame to gif:

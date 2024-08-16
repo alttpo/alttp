@@ -1548,10 +1548,58 @@ func ComposePrioritizedToPaletted(
 	subtractColors := ppu.CGADDSUB&0x80 != 0
 
 	// store mixed colors in second half of palette which is unused by BG layers:
-	hc := uint8(128)
 	mixedColors := make(map[uint16]uint8, 0x200)
+	usedColors := [256]bool{}
+	usedColors[0] = true
+	hc := uint8(1)
 
 	dst.Palette = pal
+
+	if ppu.CGADDSUB&0x13 != 0 {
+		// discover colors in use for color-math palettization:
+		for y := 0; y < 512; y++ {
+			for x := 0; x < 512; x++ {
+				// main:
+				for l := 0; l < 8; l++ {
+					if !layerEnable[l][0] {
+						continue
+					}
+					c := layers[l].ColorIndexAt(x, y)
+					if c == 0 {
+						continue
+					}
+
+					usedColors[c] = true
+					if c == hc {
+						hc++
+					}
+					break
+				}
+				if subColorSource {
+					// sub:
+					for l := 0; l < 8; l++ {
+						if !layerEnable[l][1] {
+							continue
+						}
+						c := layers[l].ColorIndexAt(x, y)
+						if c == 0 {
+							continue
+						}
+
+						usedColors[c] = true
+						if c == hc {
+							hc++
+						}
+						break
+					}
+				}
+			}
+		}
+		// find next unused color:
+		for usedColors[hc] {
+			hc++
+		}
+	}
 
 	for y := 0; y < 512; y++ {
 		for x := 0; x < 512; x++ {
@@ -1628,7 +1676,12 @@ func ComposePrioritizedToPaletted(
 							}
 						}
 						mixedColors[key] = c
-						hc++
+
+						// find next unused color:
+						usedColors[hc] = true
+						for usedColors[hc] {
+							hc++
+						}
 					}
 				}
 			} else {
