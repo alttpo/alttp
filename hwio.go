@@ -119,6 +119,8 @@ type HWIO struct {
 		oamadd            uint16
 		ObjTilemapAddress uint32
 		ObjNameSelect     uint32
+
+		Regs [256]uint8
 	}
 
 	APU struct {
@@ -198,6 +200,11 @@ func (h *HWIO) Read(address uint32) (value byte) {
 
 func (h *HWIO) Write(address uint32, value byte) {
 	offs := address & 0xFFFF
+
+	// cheap hack to capture PPU regs in a dumb way:
+	if offs >= 0x2100 && offs < 0x2200 {
+		h.PPU.Regs[offs-0x2100] = value
+	}
 
 	if offs == 0x4200 {
 		// NMITIMEN

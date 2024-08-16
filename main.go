@@ -843,11 +843,19 @@ func renderEnemyMovementGif(room *RoomState) {
 
 	roomX, roomY := room.Supertile.AbsTopLeft()
 
+	var pal color.Palette
+	var bg1p, bg2p [2]*image.Paletted
+	var obj [4]*image.Paletted
+
 movement:
 	for i := 0; i < enemyMovementFrames; i++ {
 		frameWram := *e.WRAM
 
 		g := image.NewPaletted(image.Rect(0, 0, 512, 512), nil)
+		for j := 0; j < 4; j++ {
+			obj[j] = image.NewPaletted(image.Rect(0, 0, 512, 512), nil)
+		}
+		var ppu PPURegs
 
 		//fmt.Println("FRAME")
 		//e.LoggerCPU = os.Stdout
@@ -871,13 +879,14 @@ movement:
 			write16(wram, 0xE8, bgY)
 
 			// clear OAM data:
-			for k := 0; k < 0x80; k++ {
-				e.WRAM[0x0800+(k<<2)+0] = 0
-				e.WRAM[0x0800+(k<<2)+1] = 0xF0
-				e.WRAM[0x0800+(k<<2)+2] = 0
-				e.WRAM[0x0800+(k<<2)+3] = 0
-				e.WRAM[0x0A20+k] = 0
-			}
+			// b00RunSingleFramePC starts off with this
+			// for k := 0; k < 0x80; k++ {
+			// 	e.WRAM[0x0800+(k<<2)+0] = 0
+			// 	e.WRAM[0x0800+(k<<2)+1] = 0xF0
+			// 	e.WRAM[0x0800+(k<<2)+2] = 0
+			// 	e.WRAM[0x0800+(k<<2)+3] = 0
+			// 	e.WRAM[0x0A20+k] = 0
+			// }
 
 			if err := e.ExecAtUntil(b00RunSingleFramePC, 0, 0x200000); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -913,12 +922,6 @@ movement:
 
 			// render sprites:
 			{
-				if j == 0 {
-					pal, bg1p, bg2p, addColor, halfColor := room.RenderBGLayers()
-					g.Palette = pal
-					ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-				}
-
 				// drawOutlineBox(
 				// 	g,
 				// 	&image.Uniform{color.White},
@@ -928,12 +931,45 @@ movement:
 				// 	240)
 
 				if true {
-					renderOAMSpritesFromWRAM(g, e, int(bgX), int(bgY), int(roomX), int(roomY))
+					renderOAMSpritesPrioritizedPalettedFromWRAM(obj, e, int(bgX), int(bgY), int(roomX), int(roomY))
 				} else {
 					renderSpriteLabels(g, e.WRAM[:], st)
 				}
 			}
 		}
+
+		{
+			pal, bg1p, bg2p, _, _ = room.RenderBGLayers()
+
+			g.Palette = pal
+			obj[0].Palette = pal
+			obj[1].Palette = pal
+			obj[2].Palette = pal
+			obj[3].Palette = pal
+
+			// capture PPU regs to be written:
+			if false {
+				// from PPU $21xx writes: (doesn't work without NMI handler executing)
+				ppu = PPURegs{
+					TM:       e.HWIO.PPU.Regs[0x2C],
+					TS:       e.HWIO.PPU.Regs[0x2D],
+					CGWSEL:   e.HWIO.PPU.Regs[0x30],
+					CGADDSUB: e.HWIO.PPU.Regs[0x31],
+				}
+			} else {
+				// from WRAM:
+				ppu = PPURegs{
+					TM:       e.WRAM[0x1C],
+					TS:       e.WRAM[0x1D],
+					CGWSEL:   e.WRAM[0x99],
+					CGADDSUB: e.WRAM[0x9A],
+				}
+			}
+		}
+
+		// compose all layers to single image:
+		fmt.Printf("%v: TM=%08b,TS=%08b,WS=%08b,AS=%08b\n", room.Supertile, ppu.TM, ppu.TS, ppu.CGWSEL, ppu.CGADDSUB)
+		ComposePrioritizedToPaletted(g, pal, bg1p, bg2p, obj, ppu)
 
 		// render frame to gif:
 		{

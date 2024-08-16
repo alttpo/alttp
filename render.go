@@ -554,12 +554,12 @@ func renderBGLayers(wramArray *WRAMArray, tileset []uint8) (
 
 	// render all separate BG1 and BG2 priority layers:
 	{
-		bg1wram := (*(*[0x1000]uint16)(unsafe.Pointer(&wram[0x2000])))[:]
-		renderBGsep(bg1p, bg1wram, tileset, drawBG1p0, drawBG1p1)
-		if !isDark {
-			bg2wram := (*(*[0x1000]uint16)(unsafe.Pointer(&wram[0x4000])))[:]
-			renderBGsep(bg2p, bg2wram, tileset, drawBG2p0, drawBG2p1)
-		}
+		bg2wram := (*(*[0x1000]uint16)(unsafe.Pointer(&wram[0x2000])))[:]
+		renderBGsep(bg2p, bg2wram, tileset, drawBG1p0, drawBG1p1)
+		// if !isDark {
+		bg1wram := (*(*[0x1000]uint16)(unsafe.Pointer(&wram[0x4000])))[:]
+		renderBGsep(bg1p, bg1wram, tileset, drawBG2p0, drawBG2p1)
+		// }
 	}
 
 	//subdes := read8(wram, 0x1D)
@@ -569,9 +569,11 @@ func renderBGLayers(wramArray *WRAMArray, tileset []uint8) (
 	flip := n0414 == 0x03
 
 	// swap bg1 and bg2 if color math is involved:
-	if !addColor && !halfColor && !flip {
-		bg1p, bg2p = bg2p, bg1p
-	}
+	// if !addColor && !halfColor && !flip {
+	// 	bg1p, bg2p = bg2p, bg1p
+	// }
+	_ = flip
+	_ = isDark
 
 	return
 }
@@ -1019,6 +1021,121 @@ func renderOAMSpriteNumbers(g draw.Image, vram *VRAMArray, oam *[0x200]byte, oam
 	}
 }
 
+func draw4bppTile(
+	vram *VRAMArray,
+	tp uint32,
+	w uint32,
+	h uint32,
+	fh bool,
+	fv bool,
+	x int,
+	y int,
+	pal byte,
+	setPx func(x, y int, idx uint8),
+) {
+	// 4bpp:
+	for ty := uint32(0); ty < h; ty++ {
+		var fty uint32
+		if fv {
+			// vertical flip:
+			fty = h - 1 - ty
+		} else {
+			fty = ty
+		}
+
+		for tx := uint32(0); tx < w; tx++ {
+			var ftx uint32
+			if fh {
+				// horizontal flip:
+				ftx = w - 1 - tx
+			} else {
+				// normal:
+				ftx = tx
+			}
+
+			// calculate tilemap address:
+			ta := tp + ((ftx >> 3) << 5) + ((fty >> 3) << 9) + ((fty & 7) << 1)
+			// read 4 bytes:
+			d0, d1, d2, d3 := vram[ta+0], vram[ta+1], vram[ta+16], vram[ta+17]
+
+			// calculate bit mask of X:
+			m := uint8(1) << (7 - (ftx & 7))
+
+			// compute 4-bit color index:
+			ci := uint8(0)
+			if d0&m != 0 {
+				ci |= 0b0001
+			}
+			if d1&m != 0 {
+				ci |= 0b0010
+			}
+			if d2&m != 0 {
+				ci |= 0b0100
+			}
+			if d3&m != 0 {
+				ci |= 0b1000
+			}
+
+			if ci == 0 {
+				continue
+			}
+
+			setPx(x+int(tx), y+int(ty), 128+(pal<<4)+ci)
+		}
+	}
+}
+
+func renderOAMSpritesPrioritizedPaletted(
+	obj [4]*image.Paletted,
+	vram *VRAMArray,
+	objTileMapAddress uint32,
+	objNameSelect uint32,
+	oam *[0x200]byte,
+	oamx *[0x80]byte,
+	qx int,
+	qy int,
+) {
+	for i := 127; i >= 0; i-- {
+		y := int(oam[i<<2+1])
+		if y == 0xF0 {
+			continue
+		}
+		if y > 0xF0 {
+			y -= 256
+		}
+
+		bits := oamx[i] & 3
+
+		var x int
+		if bits&1 != 0 {
+			x = int(^oam[i<<2+0]) + 1 - 512
+		} else {
+			x = int(oam[i<<2+0])
+		}
+
+		// simplification of sprite sizing:
+		var w uint32 = 8
+		var h uint32 = 8
+		if bits&2 != 0 {
+			w = 16
+			h = 16
+		}
+
+		t := int(oam[i<<2+2])
+		tn := int(oam[i<<2+3]) & 1
+		fv := oam[i<<2+3]&0x80 != 0
+		fh := oam[i<<2+3]&0x40 != 0
+		pri := (oam[i<<2+3] & 0x30) >> 4
+		pal := (oam[i<<2+3] & 0xE) >> 1
+
+		tp := objTileMapAddress + uint32(t)*0x20
+		tp += objNameSelect * uint32(tn)
+		tp &= 0xFFFF
+
+		draw4bppTile(vram, tp, w, h, fh, fv, qx+x, qy+y+1, pal, obj[pri].SetColorIndex)
+	}
+}
+
 func renderOAMSprites(
 	g draw.Image,
 	cgram *[0x100]uint16,
@@ -1084,68 +1201,17 @@ func renderOAMSprites(
 	}
 }
 
-func draw4bppTile(
-	vram *VRAMArray,
-	tp uint32,
-	w uint32,
-	h uint32,
-	fh bool,
-	fv bool,
-	x int,
-	y int,
-	pal byte,
-	setPx func(x, y int, idx uint8),
-) {
-	// 4bpp:
-	for ty := uint32(0); ty < h; ty++ {
-		var fty uint32
-		if fv {
-			// vertical flip:
-			fty = h - 1 - ty
-		} else {
-			fty = ty
-		}
-
-		for tx := uint32(0); tx < w; tx++ {
-			var ftx uint32
-			if fh {
-				// horizontal flip:
-				ftx = w - 1 - tx
-			} else {
-				// normal:
-				ftx = tx
-			}
-
-			// calculate tilemap address:
-			ta := tp + ((ftx >> 3) << 5) + ((fty >> 3) << 9) + ((fty & 7) << 1)
-			// read 4 bytes:
-			d0, d1, d2, d3 := vram[ta+0], vram[ta+1], vram[ta+16], vram[ta+17]
-
-			// calculate bit mask of X:
-			m := uint8(1) << (7 - (ftx & 7))
-
-			// compute 4-bit color index:
-			ci := uint8(0)
-			if d0&m != 0 {
-				ci |= 0b0001
-			}
-			if d1&m != 0 {
-				ci |= 0b0010
-			}
-			if d2&m != 0 {
-				ci |= 0b0100
-			}
-			if d3&m != 0 {
-				ci |= 0b1000
-			}
-
-			if ci == 0 {
-				continue
-			}
-
-			setPx(x+int(tx), y+int(ty), 128+(pal<<4)+ci)
-		}
-	}
+func renderOAMSpritesPrioritizedPalettedFromWRAM(obj [4]*image.Paletted, e *System, bgX, bgY, roomX, roomY int) {
+	renderOAMSpritesPrioritizedPaletted(
+		obj,
+		e.VRAM,
+		e.HWIO.PPU.ObjTilemapAddress,
+		e.HWIO.PPU.ObjNameSelect,
+		(*[0x200]byte)(unsafe.Pointer(&e.WRAM[0x0800])),
+		(*[0x80]byte)(unsafe.Pointer(&e.WRAM[0x0A20])),
+		bgX-roomX,
+		bgY-roomY,
+	)
 }
 
 func renderOAMSpritesFromWRAM(g draw.Image, e *System, bgX, bgY, roomX, roomY int) {
@@ -1361,10 +1427,10 @@ func ComposeToPaletted(
 	for y := 0; y < 512; y++ {
 		for x := 0; x < 512; x++ {
 			var c uint8
-			c0 := bg1p[0].ColorIndexAt(x, y)
-			c1 := bg1p[1].ColorIndexAt(x, y)
-			c2 := bg2p[0].ColorIndexAt(x, y)
-			c3 := bg2p[1].ColorIndexAt(x, y)
+			c0 := bg2p[0].ColorIndexAt(x, y)
+			c1 := bg2p[1].ColorIndexAt(x, y)
+			c2 := bg1p[0].ColorIndexAt(x, y)
+			c3 := bg1p[1].ColorIndexAt(x, y)
 
 			m1 := pick(c0, c1)
 			m2 := pick(c2, c3)
@@ -1408,6 +1474,175 @@ func ComposeToPaletted(
 	}
 
 	dst.Palette = pal
+}
+
+type PPURegs struct {
+	TM       uint8 // 0x1C  == $212C
+	TS       uint8 // 0x1D  == $212D
+	CGWSEL   uint8 // 0x99  == $2130
+	CGADDSUB uint8 // 0x9A  == $2131
+}
+
+func ComposePrioritizedToPaletted(
+	dst *image.Paletted,
+	pal color.Palette,
+	bg1p [2]*image.Paletted,
+	bg2p [2]*image.Paletted,
+	obj [4]*image.Paletted,
+	ppu PPURegs,
+) {
+	// ordered from highest to lowest priority:
+	layers := [8]*image.Paletted{
+		obj[3],
+		bg1p[1],
+		bg2p[1],
+		obj[2],
+		bg1p[0],
+		bg2p[0],
+		obj[1],
+		obj[0],
+	}
+
+	objEnable := [2]bool{
+		ppu.TM&0x10 != 0,
+		ppu.TS&0x10 != 0,
+	}
+	bg1Enable := [2]bool{
+		ppu.TM&0x01 != 0,
+		ppu.TS&0x01 != 0,
+	}
+	bg2Enable := [2]bool{
+		ppu.TM&0x02 != 0,
+		ppu.TS&0x02 != 0,
+	}
+	// dont care about BG3 or BG4
+
+	// main/sub enablements are aligned with priority order above:
+	layerEnable := [8][2]bool{
+		objEnable,
+		bg1Enable,
+		bg2Enable,
+		objEnable,
+		bg1Enable,
+		bg2Enable,
+		objEnable,
+		objEnable,
+	}
+
+	preventMath := (ppu.CGWSEL>>4)&3 > 0
+
+	mathEnable := [9]bool{
+		ppu.CGADDSUB&0x10 != 0, // obj2
+		ppu.CGADDSUB&0x01 != 0, // bg1
+		ppu.CGADDSUB&0x02 != 0, // bg2
+		ppu.CGADDSUB&0x10 != 0, // obj2
+		ppu.CGADDSUB&0x01 != 0, // bg1
+		ppu.CGADDSUB&0x02 != 0, // bg2
+		ppu.CGADDSUB&0x10 != 0, // obj2
+		ppu.CGADDSUB&0x10 != 0, // obj2
+		false,
+	}
+
+	subColorSource := ppu.CGWSEL&0x02 != 0
+	halve := ppu.CGADDSUB&0x40 != 0
+	subtractColors := ppu.CGADDSUB&0x80 != 0
+
+	// store mixed colors in second half of palette which is unused by BG layers:
+	hc := uint8(128)
+	mixedColors := make(map[uint16]uint8, 0x200)
+
+	dst.Palette = pal
+
+	for y := 0; y < 512; y++ {
+		for x := 0; x < 512; x++ {
+			lm := 8
+			cm, cs := uint8(0), uint8(0)
+			// main:
+			for l := 0; l < 8; l++ {
+				if !layerEnable[l][0] {
+					continue
+				}
+				c := layers[l].ColorIndexAt(x, y)
+				if c == 0 {
+					continue
+				}
+
+				cm = c
+				lm = l
+				break
+			}
+			if subColorSource {
+				// sub:
+				for l := 0; l < 8; l++ {
+					if !layerEnable[l][1] {
+						continue
+					}
+					c := layers[l].ColorIndexAt(x, y)
+					if c == 0 {
+						continue
+					}
+
+					cs = c
+					break
+				}
+			}
+
+			var c uint8
+			if mathEnable[lm] /*&& !preventMath*/ {
+				if cs == 0 {
+					c = cm
+				} else if cm == 0 {
+					c = cs
+				} else {
+					// do color math between main and sub:
+					key := uint16(cm) | uint16(cs)<<8
+
+					var ok bool
+					if c, ok = mixedColors[key]; !ok {
+						c = hc
+						r1, g1, b1, _ := pal[cm].RGBA()
+						r2, g2, b2, _ := pal[cs].RGBA()
+						if halve {
+							r1 >>= 1
+							r2 >>= 1
+							g1 >>= 1
+							g2 >>= 1
+							b1 >>= 1
+							b2 >>= 1
+						}
+						if subtractColors {
+							// sub:
+							pal[c] = color.RGBA64{
+								R: sat(r1 - r2),
+								G: sat(g1 - g2),
+								B: sat(b1 - b2),
+								A: 0xffff,
+							}
+						} else {
+							// add:
+							pal[c] = color.RGBA64{
+								R: sat(r1 + r2),
+								G: sat(g1 + g2),
+								B: sat(b1 + b2),
+								A: 0xffff,
+							}
+						}
+						mixedColors[key] = c
+						hc++
+					}
+				}
+			} else {
+				c = cm
+				if c == 0 {
+					c = cs
+				}
+			}
+
+			dst.SetColorIndex(x, y, c)
+		}
+	}
+
+	_ = preventMath
 }
 
 func RenderGIF(g *gif.GIF, fname string) {
