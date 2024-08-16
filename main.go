@@ -5,11 +5,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"github.com/alttpo/snes"
-	"github.com/alttpo/snes/asm"
-	"github.com/alttpo/snes/mapping/lorom"
-	"golang.org/x/image/draw"
-	"golang.org/x/image/math/fixed"
 	"image"
 	"image/color"
 	"image/gif"
@@ -20,6 +15,12 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/alttpo/snes"
+	"github.com/alttpo/snes/asm"
+	"github.com/alttpo/snes/mapping/lorom"
+	"golang.org/x/image/draw"
+	"golang.org/x/image/math/fixed"
 )
 
 const hackhackhack = false
@@ -408,13 +409,14 @@ func main() {
 		}
 
 		st16min, st16max := uint16(0), uint16(0x127)
+		// st16min, st16max := uint16(0x06b), uint16(0x06b)
 		//st16min, st16max := uint16(0x004), uint16(0x004)
 		//st16min, st16max := uint16(0x57), uint16(0x57)
 		//st16min, st16max := uint16(0x12), uint16(0x12)
 
 		// generate supertile animations:
-		//roomFn := renderEnemyMovementGif
-		roomFn := renderSupertile
+		roomFn := renderEnemyMovementGif
+		// roomFn := renderSupertile
 
 		rooms := make([]*RoomState, 0, 0x128)
 		wg := sync.WaitGroup{}
@@ -818,7 +820,7 @@ func renderEnemyMovementGif(room *RoomState) {
 		}
 		g := image.NewPaletted(image.Rect(0, 0, 512, 512), pal)
 		ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-		room.RenderSprites(g)
+		// room.RenderSprites(g)
 
 		// HACK:
 		if hackhackhack {
@@ -839,21 +841,43 @@ func renderEnemyMovementGif(room *RoomState) {
 		room.EnemyMovementGIF.BackgroundIndex = 0
 	}
 
+	roomX, roomY := room.Supertile.AbsTopLeft()
+
 movement:
 	for i := 0; i < enemyMovementFrames; i++ {
+		frameWram := *e.WRAM
+
+		g := image.NewPaletted(image.Rect(0, 0, 512, 512), nil)
+
 		//fmt.Println("FRAME")
 		//e.LoggerCPU = os.Stdout
 		// move camera to all four quadrants to get all enemies moving:
 		// NEW: patched out sprite handling to disable off-screen check
-		for j := 0; j < 1; j++ {
+		for j := 0; j < 4; j++ {
+			bgX := uint16(j&1)<<8 + sx
+			bgY := uint16(j&2)<<7 + sy + uint16((j&2)^2)<<3
+			// fmt.Printf("%d) %04X, %04X\n", j, bgX, bgY)
+
+			// reset WRAM to frame state:
+			*e.WRAM = frameWram
+
 			// BG1H
-			write16(wram, 0xE0, uint16(j&1)<<8+sx)
+			write16(wram, 0xE0, bgX)
 			// BG2H
-			write16(wram, 0xE2, uint16(j&1)<<8+sx)
+			write16(wram, 0xE2, bgX)
 			// BG1V
-			write16(wram, 0xE6, uint16(j&2)<<7+sy)
+			write16(wram, 0xE6, bgY)
 			// BG2V
-			write16(wram, 0xE8, uint16(j&2)<<7+sy)
+			write16(wram, 0xE8, bgY)
+
+			// clear OAM data:
+			for k := 0; k < 0x80; k++ {
+				e.WRAM[0x0800+(k<<2)+0] = 0
+				e.WRAM[0x0800+(k<<2)+1] = 0xF0
+				e.WRAM[0x0800+(k<<2)+2] = 0
+				e.WRAM[0x0800+(k<<2)+3] = 0
+				e.WRAM[0x0A20+k] = 0
+			}
 
 			if err := e.ExecAtUntil(b00RunSingleFramePC, 0, 0x200000); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -887,32 +911,50 @@ movement:
 				}
 			}
 
+			// render sprites:
 			{
-				pal, bg1p, bg2p, addColor, halfColor := room.RenderBGLayers()
-				g := image.NewPaletted(image.Rect(0, 0, 512, 512), pal)
-				ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-				//renderOAMSprites(g, e.WRAM, e.VRAM, e.OAM, 0, 0)
-				renderSpriteLabels(g, e.WRAM[:], st)
-
-				delta := g
-				dirty := false
-				disposal := byte(0)
-				if optimizeGIFs && room.EnemyMovementGIF.Image != nil {
-					delta, dirty = generateDeltaFrame(lastFrame, g)
-					//_ = exportPNG(fmt.Sprintf("%s.fr%03d.png", namePrefix, i), delta)
-					disposal = gif.DisposalNone
+				if j == 0 {
+					pal, bg1p, bg2p, addColor, halfColor := room.RenderBGLayers()
+					g.Palette = pal
+					ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
 				}
 
-				if !dirty && room.EnemyMovementGIF.Image != nil {
-					// just increment last frame's delay if nothing changed:
-					room.EnemyMovementGIF.Delay[len(room.EnemyMovementGIF.Delay)-1] += 2
+				// drawOutlineBox(
+				// 	g,
+				// 	&image.Uniform{color.White},
+				// 	int(bgX)-int(roomX),
+				// 	int(bgY)-int(roomY),
+				// 	256,
+				// 	240)
+
+				if true {
+					renderOAMSpritesFromWRAM(g, e, int(bgX), int(bgY), int(roomX), int(roomY))
 				} else {
-					room.EnemyMovementGIF.Image = append(room.EnemyMovementGIF.Image, delta)
-					room.EnemyMovementGIF.Delay = append(room.EnemyMovementGIF.Delay, 2)
-					room.EnemyMovementGIF.Disposal = append(room.EnemyMovementGIF.Disposal, disposal)
+					renderSpriteLabels(g, e.WRAM[:], st)
 				}
-				lastFrame = g
 			}
+		}
+
+		// render frame to gif:
+		{
+			delta := g
+			dirty := false
+			disposal := byte(0)
+			if optimizeGIFs && room.EnemyMovementGIF.Image != nil {
+				delta, dirty = generateDeltaFrame(lastFrame, g)
+				//_ = exportPNG(fmt.Sprintf("%s.fr%03d.png", namePrefix, i), delta)
+				disposal = gif.DisposalNone
+			}
+
+			if !dirty && room.EnemyMovementGIF.Image != nil {
+				// just increment last frame's delay if nothing changed:
+				room.EnemyMovementGIF.Delay[len(room.EnemyMovementGIF.Delay)-1] += 2
+			} else {
+				room.EnemyMovementGIF.Image = append(room.EnemyMovementGIF.Image, delta)
+				room.EnemyMovementGIF.Delay = append(room.EnemyMovementGIF.Delay, 2)
+				room.EnemyMovementGIF.Disposal = append(room.EnemyMovementGIF.Disposal, disposal)
+			}
+			lastFrame = g
 		}
 	}
 

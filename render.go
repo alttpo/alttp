@@ -3,10 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"golang.org/x/image/draw"
-	"golang.org/x/image/font"
-	"golang.org/x/image/font/inconsolata"
-	"golang.org/x/image/math/fixed"
 	"image"
 	"image/color"
 	"image/gif"
@@ -14,6 +10,11 @@ import (
 	"os"
 	"sync"
 	"unsafe"
+
+	"golang.org/x/image/draw"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/inconsolata"
+	"golang.org/x/image/math/fixed"
 )
 
 func renderAll(fname string, rooms []*RoomState, rowStart int, rowCount int) {
@@ -1035,8 +1036,11 @@ func renderOAMSprites(
 
 	for i := 127; i >= 0; i-- {
 		y := int(oam[i<<2+1])
-		if y >= 0xF0 {
+		if y == 0xF0 {
 			continue
+		}
+		if y > 0xF0 {
+			y -= 256
 		}
 
 		bits := oamx[i] & 3
@@ -1067,7 +1071,7 @@ func renderOAMSprites(
 		tp += objNameSelect * uint32(tn)
 		tp &= 0xFFFF
 
-		draw4bppTile(vram, tp, w, h, fh, fv, qx+x, qy+y, pal, setPx)
+		draw4bppTile(vram, tp, w, h, fh, fv, qx+x, qy+y+1, pal, setPx)
 
 		//drawShadowedString(
 		//	g,
@@ -1144,7 +1148,21 @@ func draw4bppTile(
 	}
 }
 
-func (room *RoomState) RenderSprites(g draw.Image) {
+func renderOAMSpritesFromWRAM(g draw.Image, e *System, bgX, bgY, roomX, roomY int) {
+	renderOAMSprites(
+		g,
+		(*[0x100]uint16)(unsafe.Pointer(&e.WRAM[0xC500])),
+		e.VRAM,
+		e.HWIO.PPU.ObjTilemapAddress,
+		e.HWIO.PPU.ObjNameSelect,
+		(*[0x200]byte)(unsafe.Pointer(&e.WRAM[0x0800])),
+		(*[0x80]byte)(unsafe.Pointer(&e.WRAM[0x0A20])),
+		bgX-roomX,
+		bgY-roomY,
+	)
+}
+
+func (room *RoomState) RenderSpriteHitBoxes(g draw.Image) {
 	wram := (&room.WRAM)[:]
 
 	//black := image.NewUniform(color.RGBA{0, 0, 0, 255})
@@ -1175,7 +1193,7 @@ func (room *RoomState) RenderSprites(g draw.Image) {
 		st := read8(wram, 0x0DD0+i)
 
 		// enemy type:
-		et := read8(wram, 0x0E20+i)
+		// et := read8(wram, 0x0E20+i)
 
 		var lx, ly int
 		if true {
@@ -1186,6 +1204,15 @@ func (room *RoomState) RenderSprites(g draw.Image) {
 			_, row, col := coord.RowCol()
 			lx = int(col << 3)
 			ly = int(row << 3)
+		}
+
+		bgX := int(x) - 0x80
+		if bgX < 0 {
+			bgX = 0
+		}
+		bgY := int(y) - 0x80
+		if bgY < 0 {
+			bgY = 0
 		}
 
 		//fmt.Printf(
@@ -1204,10 +1231,11 @@ func (room *RoomState) RenderSprites(g draw.Image) {
 			clr = red
 		}
 
+		// draw OAM:
 		drawOutlineBox(g, clr, lx+hb.X, ly+hb.Y, hb.W, hb.H)
 
 		// colored number label:
-		drawShadowedString(g, clr, fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)}, fmt.Sprintf("%02X", et))
+		// drawShadowedString(g, clr, fixed.Point26_6{X: fixed.I(lx), Y: fixed.I(ly + 12)}, fmt.Sprintf("%02X", et))
 	}
 
 	// draw Link:

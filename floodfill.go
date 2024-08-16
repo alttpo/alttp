@@ -1260,7 +1260,7 @@ func (room *RoomState) Init(ep EntryPoint) (err error) {
 			}
 			g := image.NewPaletted(image.Rect(0, 0, 512, 512), pal)
 			ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-			room.RenderSprites(g)
+			room.RenderSpriteHitBoxes(g)
 
 			lastFrame = g
 			room.EnemyMovementGIF.Image = append(room.EnemyMovementGIF.Image, g)
@@ -1334,7 +1334,7 @@ func (room *RoomState) Init(ep EntryPoint) (err error) {
 					pal, bg1p, bg2p, addColor, halfColor := room.RenderBGLayers()
 					g := image.NewPaletted(image.Rect(0, 0, 512, 512), pal)
 					ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-					room.RenderSprites(g)
+					room.RenderSpriteHitBoxes(g)
 
 					delta := g
 					dirty := false
