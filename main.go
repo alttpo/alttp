@@ -85,6 +85,7 @@ func main() {
 
 	entranceMinStr, entranceMaxStr := "", ""
 	oopsAllStr, excludeSpritesStr := "", ""
+	roomListStr := ""
 	flag.BoolVar(&optimizeGIFs, "optimize", true, "optimize GIFs for size with delta frames")
 	flag.BoolVar(&outputEntranceSupertiles, "entrancemap", false, "dump entrance-supertile map to stdout")
 	flag.BoolVar(&drawRoomPNGs, "roompngs", false, "create individual room PNGs")
@@ -105,6 +106,7 @@ func main() {
 	flag.BoolVar(&animateRoomDrawing, "animate", false, "render animated room drawing GIFs")
 	flag.IntVar(&animateRoomDrawingDelay, "animdelay", 15, "room drawing GIF frame delay")
 	flag.IntVar(&enemyMovementFrames, "movementframes", 0, "render N frames in animated GIF of enemy movement after room load")
+	flag.StringVar(&roomListStr, "rooms", "", "list of room numbers (hex), comma delimited, ranges with x..y permitted")
 	flag.StringVar(&entranceMinStr, "entmin", "0", "entrance ID range minimum (hex)")
 	flag.StringVar(&entranceMaxStr, "entmax", "84", "entrance ID range maximum (hex)")
 	flag.BoolVar(&staticEntranceMap, "static", false, "use static entrance->supertile map from JP 1.0")
@@ -245,6 +247,35 @@ func main() {
 		}
 		fmt.Printf("excluding sprite ids: [%s]", strings.Join(list, ","))
 	}
+
+	roomList := make([]uint16, 0, 0x127)
+	if roomListStr != "" {
+		for roomListStr != "" {
+			exprStr, remainder, found := strings.Cut(roomListStr, ",")
+			if !found {
+				exprStr = roomListStr
+			}
+			roomListStr = remainder
+
+			// check if it's a range:
+			if rangeStartStr, rangeEndStr, hasRange := strings.Cut(exprStr, ".."); hasRange {
+				rs, _ := strconv.ParseUint(rangeStartStr, 16, 16)
+				re, _ := strconv.ParseUint(rangeEndStr, 16, 16)
+				for i := uint16(rs); i <= uint16(re); i++ {
+					roomList = append(roomList, i)
+				}
+			} else {
+				// single number:
+				r, _ := strconv.ParseUint(exprStr, 16, 16)
+				roomList = append(roomList, uint16(r))
+			}
+		}
+	} else {
+		for i := uint16(0); i <= 0x127; i++ {
+			roomList = append(roomList, i)
+		}
+	}
+	fmt.Printf("%+v\n", roomList)
 
 	var err error
 
@@ -408,7 +439,7 @@ func main() {
 			}()
 		}
 
-		st16min, st16max := uint16(0), uint16(0x127)
+		// st16min, st16max := uint16(0), uint16(0x127)
 		// st16min, st16max := uint16(0x06b), uint16(0x06b)
 		//st16min, st16max := uint16(0x004), uint16(0x004)
 		//st16min, st16max := uint16(0x57), uint16(0x57)
@@ -420,7 +451,7 @@ func main() {
 
 		rooms := make([]*RoomState, 0, 0x128)
 		wg := sync.WaitGroup{}
-		for st16 := st16min; st16 <= st16max; st16++ {
+		for _, st16 := range roomList {
 			st := Supertile(st16)
 
 			var eID uint8
