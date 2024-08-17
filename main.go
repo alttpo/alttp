@@ -878,15 +878,16 @@ movement:
 			// BG2V
 			write16(wram, 0xE8, bgY)
 
-			// clear OAM data:
-			// b00RunSingleFramePC starts off with this
-			// for k := 0; k < 0x80; k++ {
-			// 	e.WRAM[0x0800+(k<<2)+0] = 0
-			// 	e.WRAM[0x0800+(k<<2)+1] = 0xF0
-			// 	e.WRAM[0x0800+(k<<2)+2] = 0
-			// 	e.WRAM[0x0800+(k<<2)+3] = 0
-			// 	e.WRAM[0x0A20+k] = 0
-			// }
+			// make Link invisible:
+			write8(wram, 0x4B, 0x0C)
+			// make Link invincible:
+			write8(wram, 0x037B, 0x01)
+			// normal Link state:
+			write8(wram, 0x5D, 0x00)
+			// put Link in center of room:
+			write16(wram, 0x22, sx+0x100)
+			write16(wram, 0x20, sy+0x100)
+			write16(wram, 0x24, 0xFFFF)
 
 			if err := e.ExecAtUntil(b00RunSingleFramePC, 0, 0x200000); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -922,6 +923,8 @@ movement:
 
 			// render sprites:
 			{
+				// fmt.Printf("%v: %02X\n", room.Supertile, e.WRAM[0x1A])
+
 				// drawOutlineBox(
 				// 	g,
 				// 	&image.Uniform{color.White},
@@ -964,6 +967,17 @@ movement:
 					CGWSEL:   e.WRAM[0x99],
 					CGADDSUB: e.WRAM[0x9A],
 				}
+			}
+
+			if i == 0 && ppu.UsesColorMath() {
+				fmt.Printf(
+					"%v: uses colormath, CGADDSUB=%08b, CGWSEL=%08b, TM=%08b, TS=%08b\n",
+					room.Supertile,
+					ppu.CGADDSUB,
+					ppu.CGWSEL,
+					ppu.TM,
+					ppu.TS,
+				)
 			}
 		}
 
@@ -1308,6 +1322,8 @@ func setupAlttp(e *System) {
 		// run a frame:
 		runFramePC = a.Label("mainRouting")
 		a.SEP(0x30)
+		// increment frame counter for proper animations:
+		a.INC_dp(0x1A)
 		a.Comment("JSR ClearOAMBuffer")
 		// ClearOAMBuffer#_00841E
 		a.JSR_abs(0x841E)
@@ -1436,6 +1452,8 @@ func setupAlttp(e *System) {
 		a.SEP(0x30)
 
 		//a.Label("continue_submodule")
+		// increment frame counter for proper animations:
+		a.INC_dp(0x1A)
 		a.Comment("JSR ClearOAMBuffer")
 		// ClearOAMBuffer#_00841E
 		a.JSR_abs(0x841E)

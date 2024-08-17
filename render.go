@@ -1483,6 +1483,10 @@ type PPURegs struct {
 	CGADDSUB uint8 // 0x9A  == $2131
 }
 
+func (p *PPURegs) UsesColorMath() bool {
+	return p.CGADDSUB&0x13 != 0
+}
+
 func ComposePrioritizedToPaletted(
 	dst *image.Paletted,
 	pal color.Palette,
@@ -1540,7 +1544,7 @@ func ComposePrioritizedToPaletted(
 		ppu.CGADDSUB&0x02 != 0, // bg2
 		ppu.CGADDSUB&0x10 != 0, // obj2
 		ppu.CGADDSUB&0x10 != 0, // obj2
-		false,
+		ppu.CGADDSUB&0x20 != 0, // col
 	}
 
 	subColorSource := ppu.CGWSEL&0x02 != 0
@@ -1555,7 +1559,7 @@ func ComposePrioritizedToPaletted(
 
 	dst.Palette = pal
 
-	if ppu.CGADDSUB&0x13 != 0 {
+	if ppu.UsesColorMath() {
 		// discover colors in use for color-math palettization:
 		for y := 0; y < 512; y++ {
 			for x := 0; x < 512; x++ {
