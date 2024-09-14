@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 func roomFindReachablePitsFromEnemies(room *RoomState) {
 	st := room.Supertile
@@ -11,7 +14,7 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 
 	tiles := wram[0x12000:0x14000]
 
-	coordLifo := make([]MapCoord, 0, 1024)
+	coordLifo := make([]MapCoord, 0, 0x2000)
 
 	for i := uint32(0); i < 16; i++ {
 		// skip inactive enemies:
@@ -27,7 +30,11 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 		x := uint16(xl) | uint16(xh)<<8
 
 		// which layer the sprite is on (0 or 1 hopefully):
-		layer := read8(wram, 0x0F20+i) & 1
+		layer := read8(wram, 0x0F20+i)
+		if layer > 1 {
+			fmt.Printf("!!!! layer = %02X\n", layer)
+		}
+		layer = layer & 1
 
 		// find tilemap coords for this enemy:
 		coord := AbsToMapCoord(x, y, uint16(layer))
@@ -80,4 +87,7 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 	if hasReachablePit {
 		fmt.Printf("%s has reachable pit\n", st)
 	}
+
+	os.WriteFile(fmt.Sprintf("t%03X.tmap", uint16(st)), tiles, 0644)
+	room.DrawSupertile()
 }
