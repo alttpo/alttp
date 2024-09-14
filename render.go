@@ -36,6 +36,7 @@ func renderAll(fname string, rooms []*RoomState, rowStart int, rowCount int) {
 
 	greenTint := image.NewUniform(color.NRGBA{0, 255, 0, 64})
 	redTint := image.NewUniform(color.NRGBA{255, 0, 0, 56})
+	yellowTint := image.NewUniform(color.NRGBA{255, 255, 0, 72})
 	cyanTint := image.NewUniform(color.NRGBA{0, 255, 255, 64})
 	blueTint := image.NewUniform(color.NRGBA{0, 0, 255, 64})
 
@@ -143,6 +144,13 @@ func renderAll(fname string, rooms []*RoomState, rowStart int, rowCount int) {
 					}
 					if v == 0x20 || v == 0x62 {
 						overlay = redTint
+					}
+					if v == 0xFF {
+						overlay = yellowTint
+					}
+					if v >= 0xF0 && v <= 0xF3 {
+						// doors
+						overlay = blueTint
 					}
 
 					x := int(tc) << 3
