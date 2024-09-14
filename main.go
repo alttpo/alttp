@@ -380,6 +380,8 @@ func main() {
 	roomsWithUnreachableWarpPits[Supertile(0x061)] = true
 	roomsWithUnreachableWarpPits[Supertile(0x010)] = true
 	roomsWithUnreachableWarpPits[Supertile(0x045)] = true
+	roomsWithUnreachableWarpPits[Supertile(0x089)] = true
+	roomsWithUnreachableWarpPits[Supertile(0x065)] = true
 
 	const entranceCount = 0x85
 
@@ -423,7 +425,18 @@ func main() {
 	if true {
 		n := runtime.NumCPU()
 		//n := 1
+
 		jobs := make(chan func(), n)
+		wg := sync.WaitGroup{}
+
+		submitJob := func(job func()) {
+			wg.Add(1)
+			jobs <- func() {
+				job()
+				wg.Done()
+			}
+		}
+
 		for i := 0; i < n; i++ {
 			go func() {
 				defer func() {
@@ -446,11 +459,11 @@ func main() {
 		//st16min, st16max := uint16(0x12), uint16(0x12)
 
 		// generate supertile animations:
-		roomFn := renderEnemyMovementGif
+		roomFn := roomFindReachablePitsFromEnemies
+		// roomFn := renderEnemyMovementGif
 		// roomFn := renderSupertile
 
 		rooms := make([]*RoomState, 0, 0x128)
-		wg := sync.WaitGroup{}
 		for _, st16 := range roomList {
 			st := Supertile(st16)
 
@@ -468,8 +481,7 @@ func main() {
 			}
 			rooms = append(rooms, room)
 
-			wg.Add(1)
-			jobs <- func() {
+			submitJob(func() {
 				defer func() {
 					if err := recover(); err != nil {
 						fmt.Println(err)
@@ -479,8 +491,7 @@ func main() {
 
 				fmt.Printf("process room %s\n", room.Supertile)
 				processRoom(room, &e, roomFn)
-				wg.Done()
-			}
+			})
 		}
 
 		wg.Wait()
@@ -725,6 +736,34 @@ func main() {
 		//if drawEG1 || drawEG2 {
 		//	wg.Wait()
 		//}
+
+		var rooms []*RoomState
+		if drawEG1 || drawEG2 {
+			rooms = make([]*RoomState, 0, 0x128)
+			for i := range entranceGroups {
+				g := &entranceGroups[i]
+				rooms = append(rooms, g.Rooms...)
+			}
+		}
+
+		// condense all maps into big atlas images:
+		if drawEG1 {
+			wg.Add(1)
+			go func() {
+				renderAll("eg1", rooms, 0x00, 0x10)
+				wg.Done()
+			}()
+		}
+		if drawEG2 {
+			wg.Add(1)
+			go func() {
+				renderAll("eg2", rooms, 0x10, 0x3)
+				wg.Done()
+			}()
+		}
+		if drawEG1 || drawEG2 {
+			wg.Wait()
+		}
 	}
 
 	fmt.Println("main exit")
