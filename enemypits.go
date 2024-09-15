@@ -56,7 +56,6 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 		tpos := read16(wram, uint32(0x19A0+(m<<1)))
 		// stop marker:
 		if tpos == 0 {
-			//fmt.Printf("    door stop at marker\n")
 			break
 		}
 
@@ -97,7 +96,7 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 			}
 			count++
 		}
-		fmt.Printf("%s: type=%s dir=%s pos=%s: %s\n", st, door.Type, door.Dir, door.Pos, dbg.String())
+		fmt.Printf("%s: door type=%s dir=%s pos=%s: %s\n", st, door.Type, door.Dir, door.Pos, dbg.String())
 
 		var secondTileOffs MapCoord
 		switch door.Dir {
@@ -135,11 +134,23 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 
 		// skip non-enemies:
 		et := read8(wram, uint32(0x0E20+i))
+		if et >= 0xD8 {
+			// all collectibles and miscellaneous things that are not enemies:
+			continue
+		}
 		switch et {
+		// switches:
+		case 0x04, 0x05, 0x06, 0x07, 0x14, 0x1E, 0x21:
+			continue
+		// bumper
+		case 0x93:
+			continue
+		// eye laser
+		case 0x95, 0x96, 0x97, 0x98:
+			continue
 		// pipes:
 		case 0xAE, 0xAF, 0xB0, 0xB1:
 			continue
-			//case
 		}
 
 		// find abs coords for this enemy:
