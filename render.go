@@ -402,27 +402,29 @@ func (room *RoomState) DrawSupertile() {
 	//	order[p].Palette = palTransp
 	//}
 
-	// first GIF frames build up the layers:
-	frames := [4]*image.Paletted{
-		image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
-		image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
-		image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
-		image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+	if supertileGifs || animateRoomDrawing {
+		// first GIF frames build up the layers:
+		frames := [4]*image.Paletted{
+			image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+			image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+			image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+			image.NewPaletted(image.Rect(0, 0, 512, 512), pal),
+		}
+
+		ComposeToPaletted(frames[0], pal, bg1p, bg2p, addColor, halfColor)
+		ComposeToPaletted(frames[1], pal, bg1p, bg2p, addColor, halfColor)
+		ComposeToPaletted(frames[2], pal, bg1p, bg2p, addColor, halfColor)
+		ComposeToPaletted(frames[3], pal, bg1p, bg2p, addColor, halfColor)
+
+		//renderBGComposedPaletted(pal, [4]*image.Paletted{order[0], blankFrame, blankFrame, blankFrame}, addColor, halfColor),
+		//renderBGComposedPaletted(pal, [4]*image.Paletted{order[0], order[1], blankFrame, blankFrame}, addColor, halfColor),
+		//renderBGComposedPaletted(pal, [4]*image.Paletted{order[0], order[1], order[2], blankFrame}, addColor, halfColor),
+		//renderBGComposedPaletted(pal, [4]*image.Paletted{order[0], order[1], order[2], order[3]}, addColor, halfColor),
+
+		room.GIF.Image = append(room.GIF.Image, frames[:]...)
+		room.GIF.Delay = append(room.GIF.Delay, 50, 50, 50, 50)
+		room.GIF.Disposal = append(room.GIF.Disposal, 0, 0, 0, 0)
 	}
-
-	ComposeToPaletted(frames[0], pal, bg1p, bg2p, addColor, halfColor)
-	ComposeToPaletted(frames[1], pal, bg1p, bg2p, addColor, halfColor)
-	ComposeToPaletted(frames[2], pal, bg1p, bg2p, addColor, halfColor)
-	ComposeToPaletted(frames[3], pal, bg1p, bg2p, addColor, halfColor)
-
-	//renderBGComposedPaletted(pal, [4]*image.Paletted{order[0], blankFrame, blankFrame, blankFrame}, addColor, halfColor),
-	//renderBGComposedPaletted(pal, [4]*image.Paletted{order[0], order[1], blankFrame, blankFrame}, addColor, halfColor),
-	//renderBGComposedPaletted(pal, [4]*image.Paletted{order[0], order[1], order[2], blankFrame}, addColor, halfColor),
-	//renderBGComposedPaletted(pal, [4]*image.Paletted{order[0], order[1], order[2], order[3]}, addColor, halfColor),
-
-	room.GIF.Image = append(room.GIF.Image, frames[:]...)
-	room.GIF.Delay = append(room.GIF.Delay, 50, 50, 50, 50)
-	room.GIF.Disposal = append(room.GIF.Disposal, 0, 0, 0, 0)
 
 	g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
 	ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
