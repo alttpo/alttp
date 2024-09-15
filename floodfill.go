@@ -625,6 +625,8 @@ type RoomState struct {
 	markedFloor bool
 	lifoSpace   [0x2000]ScanState
 	lifo        []ScanState
+
+	HasReachablePit bool
 }
 
 func CreateRoom(ent *Entrance, st Supertile, initEmu *System) (room *RoomState) {

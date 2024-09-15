@@ -496,6 +496,14 @@ func main() {
 
 		wg.Wait()
 
+		dbg := strings.Builder{}
+		for _, room := range rooms {
+			if room.HasReachablePit {
+				fmt.Fprintf(&dbg, ",$%03X", uint16(room.Supertile))
+			}
+		}
+		fmt.Printf("rooms with enemy-reachable pits: %s\n", dbg.String()[1:])
+
 		// condense all maps into big atlas images:
 		if drawEG1 {
 			wg.Add(1)
