@@ -1375,7 +1375,7 @@ func ComposeToNonPaletted(
 			for x := 0; x < 512; x++ {
 				bg1c := pick(bg1p[0].ColorIndexAt(x, y), bg1p[1].ColorIndexAt(x, y))
 				bg2c := pick(bg2p[0].ColorIndexAt(x, y), bg2p[1].ColorIndexAt(x, y))
-				if bg2c != 0 {
+				if bg2c != 0 && bg1c != 0 {
 					r1, g1, b1, _ := pal[bg1c].RGBA()
 					r2, g2, b2, _ := pal[bg2c].RGBA()
 					c := color.RGBA64{
@@ -1386,7 +1386,8 @@ func ComposeToNonPaletted(
 					}
 					dst.Set(mx+x, my+y, c)
 				} else {
-					dst.Set(mx+x, my+y, pal[bg1c])
+					c := pick(bg1c, bg2c)
+					dst.Set(mx+x, my+y, pal[c])
 				}
 			}
 		}
