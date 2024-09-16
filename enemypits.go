@@ -159,16 +159,11 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 		y := uint16(yl) | uint16(yh)<<8
 		x := uint16(xl) | uint16(xh)<<8
 
-		// which layer the sprite is on (0 or 1 hopefully):
+		// which layer the sprite is on (0 or 1):
 		layer := read8(wram, 0x0F20+i)
-		if layer > 1 {
-			fmt.Printf("!!!! layer = %02X\n", layer)
-		}
-		layer = layer & 1
 
 		// find tilemap coords for this enemy:
 		coord := AbsToMapCoord(x, y, uint16(layer))
-		// _, row, col := coord.RowCol()
 
 		fmt.Printf("%s: enemy type=$%02X, pos=%s\n", st, et, coord)
 
@@ -178,21 +173,6 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 		coordLifo = append(coordLifo, coord+0x01)
 		coordLifo = append(coordLifo, coord+0x40)
 		coordLifo = append(coordLifo, coord+0x41)
-		// if tiles[coord] == 0x20 {
-		// 	// fudge one tile in each direction to move outside the pit:
-		// 	if c, _, ok := coord.MoveBy(DirEast, 1); ok && tiles[c] != 0x20 {
-		// 		coordLifo = append(coordLifo, c)
-		// 	}
-		// 	if c, _, ok := coord.MoveBy(DirWest, 1); ok && tiles[c] != 0x20 {
-		// 		coordLifo = append(coordLifo, c)
-		// 	}
-		// 	if c, _, ok := coord.MoveBy(DirNorth, 1); ok && tiles[c] != 0x20 {
-		// 		coordLifo = append(coordLifo, c)
-		// 	}
-		// 	if c, _, ok := coord.MoveBy(DirSouth, 1); ok && tiles[c] != 0x20 {
-		// 		coordLifo = append(coordLifo, c)
-		// 	}
-		// }
 	}
 
 	hasReachablePit := false
@@ -234,19 +214,6 @@ func roomFindReachablePitsFromEnemies(room *RoomState) {
 	for _, c := range startCoords {
 		room.Reachable[c] = 0xFF
 	}
-	// mark doors:
-	// for _, door := range room.Doors {
-	// 	switch door.Dir {
-	// 	case DirNorth:
-	// 		room.Reachable[door.Pos] = 0xF0
-	// 	case DirSouth:
-	// 		room.Reachable[door.Pos] = 0xF1
-	// 	case DirEast:
-	// 		room.Reachable[door.Pos] = 0xF2
-	// 	case DirWest:
-	// 		room.Reachable[door.Pos] = 0xF3
-	// 	}
-	// }
 
 	room.HasReachablePit = hasReachablePit
 
