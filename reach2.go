@@ -95,11 +95,15 @@ func ReachTaskWorker(q Q, t T) {
 			HasReachablePit:   false,
 		}
 		t.Rooms[st] = room
-	}
-	for i := range room.Reachable {
-		room.Reachable[i] = 0x01
+		for i := range room.Reachable {
+			room.Reachable[i] = 0x01
+		}
 	}
 	t.RoomsLock.Unlock()
+
+	// don't have two or more goroutines clobbering the same room:
+	room.Mutex.Lock()
+	defer room.Mutex.Unlock()
 
 	type SE struct {
 		c MapCoord
