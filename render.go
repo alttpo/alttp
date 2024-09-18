@@ -902,7 +902,7 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 			}
 
 			e := System{}
-			_ = e.InitEmulatorFrom(&room.e)
+			_ = e.InitEmulatorFrom(room.e)
 			//e.LoggerCPU = os.Stdout
 
 			// set data bank:

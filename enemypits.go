@@ -9,7 +9,7 @@ import (
 func roomFindReachablePitsFromEnemies(room *RoomState) {
 	st := room.Supertile
 
-	e := &room.e
+	e := room.e
 	wram := e.WRAM[:]
 	// vram := e.VRAM[:]
 

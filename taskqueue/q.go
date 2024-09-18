@@ -4,13 +4,18 @@ import "sync"
 
 type WorkerFunc[T any] func(*Q[T], T)
 
+type I[T any] struct {
+	job  WorkerFunc[T]
+	item T
+}
+
 type Q[T any] struct {
-	c      chan T
+	c      chan I[T]
 	wg     sync.WaitGroup
 	worker WorkerFunc[T]
 }
 
-func NewQ[T any](workerCount int, worker WorkerFunc[T]) (q *Q[T]) {
+func NewQ[T any](workerCount int, chanSize int, worker WorkerFunc[T]) (q *Q[T]) {
 	if worker == nil {
 		panic("worker cannot be nil")
 	}
@@ -19,14 +24,14 @@ func NewQ[T any](workerCount int, worker WorkerFunc[T]) (q *Q[T]) {
 	}
 
 	q = &Q[T]{
-		c:      make(chan T, workerCount),
+		c:      make(chan I[T], chanSize),
 		worker: worker,
 	}
 
 	for n := 0; n < workerCount; n++ {
 		go func() {
-			for item := range q.c {
-				q.runWorker(item)
+			for i := range q.c {
+				q.runJob(i)
 			}
 		}()
 	}
@@ -34,14 +39,19 @@ func NewQ[T any](workerCount int, worker WorkerFunc[T]) (q *Q[T]) {
 	return
 }
 
-func (q *Q[T]) runWorker(item T) {
+func (q *Q[T]) runJob(i I[T]) {
 	defer q.wg.Done()
-	q.worker(q, item)
+	i.job(q, i.item)
 }
 
 func (q *Q[T]) SubmitItem(item T) {
 	q.wg.Add(1)
-	q.c <- item
+	q.c <- I[T]{q.worker, item}
+}
+
+func (q *Q[T]) SubmitJob(item T, job WorkerFunc[T]) {
+	q.wg.Add(1)
+	q.c <- I[T]{job, item}
 }
 
 func (q *Q[T]) Wait() {

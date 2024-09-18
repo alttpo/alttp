@@ -426,7 +426,7 @@ func main() {
 	if true {
 		roomsMap := make(map[uint16]*RoomState)
 		roomsLock := sync.Mutex{}
-		q := taskqueue.NewQ(runtime.NumCPU(), ReachTaskWorker)
+		q := taskqueue.NewQ(runtime.NumCPU(), 0x128, ReachTaskFromEntranceWorker)
 
 		// eIDmin, eIDmax := uint8(0), uint8(0x84)
 		for eID := entranceMin; eID <= entranceMax; eID++ {
@@ -823,7 +823,7 @@ func processRoom(room *RoomState, initEmu *System, roomFn func(room *RoomState))
 	var err error
 
 	eID := room.Entrance.EntranceID
-	e := &room.e
+	e := room.e
 
 	// have the emulator's WRAM refer to room.WRAM
 	e.WRAM = &room.WRAM
@@ -862,7 +862,7 @@ func renderEnemyMovementGif(room *RoomState) {
 		return
 	}
 
-	e := &room.e
+	e := room.e
 	st := room.Supertile
 	wram := e.WRAM[:]
 	vram := e.VRAM[:]

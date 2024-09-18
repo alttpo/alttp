@@ -616,7 +616,7 @@ type RoomState struct {
 	Reachable [0x2000]byte
 	Hookshot  map[MapCoord]byte
 
-	e               System
+	e               *System
 	WRAM            [0x20000]byte
 	WRAMAfterLoaded [0x20000]byte
 	VRAMTileSet     [0x4000]byte
@@ -646,7 +646,7 @@ func CreateRoom(ent *Entrance, st Supertile, initEmu *System) (room *RoomState) 
 	}
 	room.TilesVisited = room.TilesVisitedStar0
 
-	e := &room.e
+	e := room.e
 
 	// have the emulator's WRAM refer to room.WRAM
 	e.WRAM = &room.WRAM
@@ -666,7 +666,7 @@ func (room *RoomState) Init(ep EntryPoint) (err error) {
 
 	namePrefix := fmt.Sprintf("t%03x.e%02x", uint16(st), room.Entrance.EntranceID)
 
-	e := &room.e
+	e := room.e
 	wram := (e.WRAM)[:]
 	vram := (e.VRAM)[:]
 	tiles := room.Tiles[:]
@@ -2360,7 +2360,7 @@ func (r *RoomState) scanHookshot(t MapCoord, d Direction) {
 }
 
 func (r *RoomState) HandleRoomTags() bool {
-	e := &r.e
+	e := r.e
 
 	// if no tags present, don't check them:
 	oldAE, oldAF := read8(r.WRAM[:], 0xAE), read8(r.WRAM[:], 0xAF)
