@@ -96,7 +96,39 @@ func ReachTaskWorker(q Q, t T) {
 		}
 		t.Rooms[st] = room
 	}
+	for i := range room.Reachable {
+		room.Reachable[i] = 0x01
+	}
 	t.RoomsLock.Unlock()
+
+	type SE struct {
+		c MapCoord
+		d Direction
+		s int
+	}
+	lifo := make([]SE, 0, 1024)
+
+	{
+		// find entry point:
+		y := read16(wram, 0x0020)
+		x := read16(wram, 0x0022)
+		lyr := read16(wram, 0x00EE)
+		c := AbsToMapCoord(x, y, lyr)
+		d := Direction(read8(wram, 0x002F) >> 1)
+
+		room.Reachable[c] = 0xFF
+
+		lifo = append(lifo, SE{c: c, d: d, s: 0})
+	}
+
+	tiles := wram[0x12000:0x14000]
+
+	for len(lifo) > 0 {
+		se := lifo[len(lifo)-1]
+		lifo = lifo[0 : len(lifo)-1]
+
+		fmt.Printf("$%03X: %02X\n", st, tiles[se.c])
+	}
 
 	{
 		// render BG layers:
