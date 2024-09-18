@@ -10,6 +10,7 @@ import (
 	"image/gif"
 	"os"
 	"path/filepath"
+	"roomloader/taskqueue"
 	"runtime"
 	"strconv"
 	"strings"
@@ -421,8 +422,49 @@ func main() {
 		}
 	}
 
-	// run generic processing jobs on all supertiles:
+	// run jobs:
 	if true {
+		roomsMap := make(map[uint16]*RoomState)
+		roomsLock := sync.Mutex{}
+		q := taskqueue.NewQ(runtime.NumCPU(), ReachTaskWorker)
+
+		// eIDmin, eIDmax := uint8(0), uint8(0x84)
+		for eID := entranceMin; eID <= entranceMax; eID++ {
+			// skip attract mode cinematic entrances:
+			if eID >= 0x73 && eID <= 0x75 {
+				continue
+			}
+
+			q.SubmitItem(&ReachTask{
+				EntranceID:      eID,
+				InitialEmulator: &e,
+				Rooms:           roomsMap,
+				RoomsLock:       &roomsLock,
+			})
+		}
+		fmt.Println("wait")
+		q.Wait()
+		fmt.Println("close")
+		q.Close()
+
+		rooms := make([]*RoomState, 0, 0x128)
+		for _, room := range roomsMap {
+			rooms = append(rooms, room)
+		}
+
+		// condense all maps into big atlas images:
+		if drawEG1 {
+			renderAll("eg1", rooms, 0x00, 0x10)
+		}
+		if drawEG2 {
+			renderAll("eg2", rooms, 0x10, 0x3)
+		}
+		fmt.Println("done")
+		return
+	}
+
+	// run generic processing jobs on all supertiles:
+	if false {
 		n := runtime.NumCPU()
 		//n := 1
 
