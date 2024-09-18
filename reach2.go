@@ -23,8 +23,8 @@ type ReachTask struct {
 type T = *ReachTask
 type Q = *taskqueue.Q[T]
 
-func reachTaskFloodfill(q Q, t T, e *System) {
-	room := getOrCreateRoom(t, e)
+func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
+	room = getOrCreateRoom(t, e)
 	st := t.Supertile
 
 	// don't have two or more goroutines clobbering the same room:
@@ -107,9 +107,6 @@ func reachTaskFloodfill(q Q, t T, e *System) {
 		}
 	}
 
-	// mark Link's entry position:
-	room.Reachable[t.Start] = 0xFF
-
 	if room.Rendered == nil {
 		// render BG layers:
 		pal, bg1p, bg2p, addColor, halfColor := renderBGLayers(e.WRAM, e.VRAM[0x4000:0x8000])
@@ -120,6 +117,8 @@ func reachTaskFloodfill(q Q, t T, e *System) {
 		// store full underworld rendering for inclusion into EG map:
 		room.Rendered = g
 	}
+
+	return
 }
 
 func ReachTaskInterRoom(q Q, t T) {
@@ -182,7 +181,10 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 	t.Start = linkC
 	t.Direction = linkD
 
-	reachTaskFloodfill(q, t, e)
+	room := reachTaskFloodfill(q, t, e)
+
+	// mark Link's entry position:
+	room.Reachable[t.Start] = 0xFF
 }
 
 func getOrCreateRoom(t T, e *System) (room *RoomState) {
