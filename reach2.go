@@ -213,24 +213,8 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 
 		var ok bool
 		var c MapCoord
-		count := 3
-		// find how far to clear to opposite doorway:
-		c = door.Pos
-		dbg := strings.Builder{}
-		for i := 0; i < 16; i++ {
-			c, _, ok = c.MoveBy(door.Dir, 1)
-			if !ok {
-				break
-			}
-			fmt.Fprintf(&dbg, "%02X,", tiles[c])
-			if tiles[c] == 0x02 && count >= 8 {
-				count++
-				break
-			}
-			count++
-		}
-		fmt.Printf("$%03X: door type=%s dir=%s pos=%s: %s\n", uint16(t.Supertile), door.Type, door.Dir, door.Pos, dbg.String())
 
+		// find the first doorway tile:
 		var secondTileOffs MapCoord
 		switch door.Dir {
 		case DirNorth:
@@ -249,10 +233,50 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 			c, _, ok = c.MoveBy(DirEast, 2)
 			secondTileOffs = 0x40
 		}
+		doorwayC := c
+
+		count := 3
+		v := tiles[doorwayC]
+
+		dbg := strings.Builder{}
+		if (v >= 0xF0 && v <= 0xF7) || (v >= 0xF8 && v <= 0xFF) {
+			// find opposite end of matched doorway:
+			for i := 0; i < 16; i++ {
+				c, _, ok = c.MoveBy(door.Dir, 1)
+				if !ok {
+					break
+				}
+				fmt.Fprintf(&dbg, "%02X,", tiles[c])
+				if tiles[c] == v^8 && count >= 4 {
+					count++
+					break
+				}
+				count++
+			}
+		} else {
+			// find how far to clear to opposite doorway:
+			c = door.Pos
+			for i := 0; i < 16; i++ {
+				c, _, ok = c.MoveBy(door.Dir, 1)
+				if !ok {
+					break
+				}
+				fmt.Fprintf(&dbg, "%02X,", tiles[c])
+				if tiles[c] == 0x02 && count >= 8 {
+					count++
+					break
+				}
+				count++
+			}
+		}
+
+		fmt.Printf("$%03X: door type=%s dir=%s pos=%s: %s\n", uint16(t.Supertile), door.Type, door.Dir, door.Pos, dbg.String())
+
+		c, ok = doorwayC, true
 
 		// doors only allow bidirectional travel:
 		allowDirFlags := uint8(1<<uint8(door.Dir)) | uint8(1<<uint8(door.Dir.Opposite()))
-		if tiles[c] == 0x8E || tiles[c] == 0x8F {
+		if tiles[c] == 0x8E || tiles[c] == 0x8F || door.Type == 0x2A {
 			// exit/entrance doorways cannot allow exit traversal:
 			allowDirFlags = uint8(1 << uint8(door.Dir.Opposite()))
 		}
@@ -275,6 +299,7 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 	}
 
 	os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
+	os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
 
 	return
 }
@@ -364,24 +389,6 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 		traverseBy := 1
 		// fmt.Printf("$%03X: [$%04X]=%02X\n", uint16(st), uint16(se.c), v)
 
-		// transition to neighboring room at the edges:
-		if ok, edgeDir, _, _ := se.c.IsEdge(); ok {
-			if neighborSt, _, ok := st.MoveBy(edgeDir); ok {
-				q.SubmitJob(
-					&ReachTask{
-						InitialEmulator: e,
-						EntranceID:      t.EntranceID,
-						Rooms:           t.Rooms,
-						RoomsLock:       t.RoomsLock,
-						Supertile:       neighborSt,
-						Start:           se.c.OppositeEdge(),
-						Direction:       edgeDir,
-					},
-					ReachTaskInterRoom,
-				)
-			}
-		}
-
 		if v == 0x20 {
 			// pit:
 			room.Reachable[se.c] = v
@@ -391,9 +398,11 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 		} else if v&0xF0 == 0x80 {
 			// shutter doors and entrance doors
 			canTraverse = true
+			canTurn = false
 		} else if v&0xF0 == 0xF0 {
-			// entrances:
+			// doorways:
 			canTraverse = true
+			canTurn = false
 		} else if v == 0x28 {
 			// 28 - North ledge
 			canTraverse = true
@@ -422,6 +431,28 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 
 		if canTraverse {
 			room.Reachable[se.c] = v
+
+			// transition to neighboring room at the edges:
+			if ok, edgeDir, _, _ := se.c.IsEdge(); ok {
+				if traverseDir == edgeDir && room.CanTraverseDir(se.c, traverseDir) {
+					if neighborSt, _, ok := st.MoveBy(traverseDir); ok {
+						fmt.Printf("$%03X: edge $%04X %s\n", uint16(t.Supertile), uint16(se.c), traverseDir)
+						q.SubmitJob(
+							&ReachTask{
+								InitialEmulator: e,
+								EntranceID:      t.EntranceID,
+								Rooms:           t.Rooms,
+								RoomsLock:       t.RoomsLock,
+								Supertile:       neighborSt,
+								Start:           se.c.OppositeEdge(),
+								Direction:       traverseDir,
+							},
+							ReachTaskInterRoom,
+						)
+						continue
+					}
+				}
+			}
 
 			if canTurn {
 				// turn from here:

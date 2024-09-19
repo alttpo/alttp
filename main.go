@@ -422,11 +422,11 @@ func main() {
 		}
 	}
 
-	// run jobs:
+	// run jobs starting from entrances:
 	if true {
 		roomsMap := make(map[uint16]*RoomState)
 		roomsLock := sync.Mutex{}
-		q := taskqueue.NewQ(runtime.NumCPU(), 0x128, ReachTaskFromEntranceWorker)
+		q := taskqueue.NewQ(runtime.NumCPU(), 0x1000, ReachTaskFromEntranceWorker)
 
 		// eIDmin, eIDmax := uint8(0), uint8(0x84)
 		for eID := entranceMin; eID <= entranceMax; eID++ {
