@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"image"
 	"image/gif"
+	"os"
 	"roomloader/taskqueue"
+	"strings"
 	"sync"
 )
 
@@ -22,104 +24,6 @@ type ReachTask struct {
 
 type T = *ReachTask
 type Q = *taskqueue.Q[T]
-
-func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
-	room = getOrCreateRoom(t, e)
-	st := t.Supertile
-
-	// don't have two or more goroutines clobbering the same room:
-	// NOTE: this causes deadlock if the job queue channel size is too small
-	room.Mutex.Lock()
-	defer room.Mutex.Unlock()
-
-	wram := (e.WRAM)[:]
-	tiles := wram[0x12000:0x14000]
-
-	type SE struct {
-		c MapCoord
-		d Direction
-		s int
-	}
-	lifo := make([]SE, 0, 1024)
-
-	// push starting state:
-	lifo = append(lifo, SE{c: t.Start, d: t.Direction, s: 0})
-
-	// iteratively recurse over processing stack:
-	for len(lifo) > 0 {
-		se := lifo[len(lifo)-1]
-		lifo = lifo[0 : len(lifo)-1]
-
-		if _, ok := room.TilesVisited[se.c]; ok {
-			continue
-		}
-		room.TilesVisited[se.c] = empty{}
-
-		v := tiles[se.c]
-		room.Reachable[se.c] = v
-		fmt.Printf("$%03X: [$%04X]=%02X\n", uint16(st), uint16(se.c), v)
-
-		// transition to neighboring room at the edges:
-		if ok, edgeDir, _, _ := se.c.IsEdge(); ok {
-			if neighborSt, _, ok := st.MoveBy(edgeDir); ok {
-				q.SubmitJob(
-					&ReachTask{
-						InitialEmulator: e,
-						EntranceID:      t.EntranceID,
-						Rooms:           t.Rooms,
-						RoomsLock:       t.RoomsLock,
-						Supertile:       neighborSt,
-						Start:           se.c.OppositeEdge(),
-						Direction:       edgeDir,
-					},
-					ReachTaskInterRoom,
-				)
-			}
-		}
-
-		canTraverse := false
-		if v == 0x20 {
-			room.HasReachablePit = true
-		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(se.c, v) {
-			canTraverse = true
-		} else if v&0xF0 == 0x80 {
-			// shutter doors
-			canTraverse = true
-		} else if v&0xF0 == 0xF0 {
-			// entrances:
-			canTraverse = true
-		}
-
-		if canTraverse {
-			// traverse in 4 directions from here:
-			if c, d, ok := se.c.MoveBy(se.d.Opposite(), 1); ok {
-				lifo = append(lifo, SE{c: c, d: d, s: 0})
-			}
-			if c, d, ok := se.c.MoveBy(se.d.RotateCW(), 1); ok {
-				lifo = append(lifo, SE{c: c, d: d, s: 0})
-			}
-			if c, d, ok := se.c.MoveBy(se.d.RotateCCW(), 1); ok {
-				lifo = append(lifo, SE{c: c, d: d, s: 0})
-			}
-			if c, d, ok := se.c.MoveBy(se.d, 1); ok {
-				lifo = append(lifo, SE{c: c, d: d, s: 0})
-			}
-		}
-	}
-
-	if room.Rendered == nil {
-		// render BG layers:
-		pal, bg1p, bg2p, addColor, halfColor := renderBGLayers(e.WRAM, e.VRAM[0x4000:0x8000])
-
-		g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
-		ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-
-		// store full underworld rendering for inclusion into EG map:
-		room.Rendered = g
-	}
-
-	return
-}
 
 func ReachTaskInterRoom(q Q, t T) {
 	var err error
@@ -245,10 +149,14 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 
 	for i := range room.Reachable {
 		room.Reachable[i] = 0x01
+		// all 4 directions are allowable by default:
+		room.AllowDirFlags[i] = 0b00001111
 	}
 
 	wram := (e.WRAM)[:]
 	tiles := wram[0x12000:0x14000]
+
+	os.WriteFile(fmt.Sprintf("r%03X.pre.tmap", uint16(t.Supertile)), tiles, 0644)
 
 	// open up "locked" cell doors:
 	for i := uint32(0); i < 6; i++ {
@@ -275,5 +183,249 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 		}
 	}
 
+	// open up doorways:
+	room.Doors = make([]Door, 0, 16)
+	for m := 0; m < 16; m++ {
+		tpos := read16(wram, uint32(0x19A0+(m<<1)))
+		// stop marker:
+		if tpos == 0 {
+			break
+		}
+
+		door := Door{
+			Pos:  MapCoord(tpos >> 1),
+			Type: DoorType(read16(wram, uint32(0x1980+(m<<1)))),
+			Dir:  Direction(read16(wram, uint32(0x19C0+(m<<1)))),
+		}
+		if door.Type == 0x30 {
+			// exploding wall:
+			pos := int(door.Pos)
+			for c := 0; c < 11; c++ {
+				for r := 0; r < 12; r++ {
+					tiles[pos+(r<<6)-c] = 0
+					tiles[pos+(r<<6)+1+c] = 0
+				}
+			}
+			continue
+		}
+
+		room.Doors = append(room.Doors, door)
+
+		var ok bool
+		var c MapCoord
+		count := 3
+		// find how far to clear to opposite doorway:
+		c = door.Pos
+		dbg := strings.Builder{}
+		for i := 0; i < 16; i++ {
+			c, _, ok = c.MoveBy(door.Dir, 1)
+			if !ok {
+				break
+			}
+			fmt.Fprintf(&dbg, "%02X,", tiles[c])
+			if tiles[c] == 0x02 && count >= 8 {
+				count++
+				break
+			}
+			count++
+		}
+		fmt.Printf("$%03X: door type=%s dir=%s pos=%s: %s\n", uint16(t.Supertile), door.Type, door.Dir, door.Pos, dbg.String())
+
+		var secondTileOffs MapCoord
+		switch door.Dir {
+		case DirNorth:
+			c, _, _ = door.Pos.MoveBy(DirEast, 1)
+			c, _, ok = c.MoveBy(DirSouth, 2)
+			secondTileOffs = 0x01
+		case DirSouth:
+			c, _, _ = door.Pos.MoveBy(DirSouth, 1)
+			c, _, ok = c.MoveBy(DirEast, 1)
+			secondTileOffs = 0x01
+		case DirEast:
+			c, _, ok = door.Pos.MoveBy(DirSouth, 1)
+			secondTileOffs = 0x40
+		case DirWest:
+			c, _, _ = door.Pos.MoveBy(DirSouth, 1)
+			c, _, ok = c.MoveBy(DirEast, 2)
+			secondTileOffs = 0x40
+		}
+
+		// doors only allow bidirectional travel:
+		allowDirFlags := uint8(1<<uint8(door.Dir)) | uint8(1<<uint8(door.Dir.Opposite()))
+		if door.Type == 0x0C || door.Type == 0x0A {
+			// exit/entrance doorways cannot allow exit traversal:
+			allowDirFlags = uint8(1 << uint8(door.Dir.Opposite()))
+		}
+
+		// clear the path:
+		for i := 0; ok && i < count; i++ {
+			room.AllowDirFlags[c] = allowDirFlags
+			room.AllowDirFlags[c+secondTileOffs] = allowDirFlags
+
+			// only replace tiles that are collision types:
+			if isTileCollision(tiles[c]) {
+				tiles[c] = 0
+			}
+			if isTileCollision(tiles[c+secondTileOffs]) {
+				tiles[c+secondTileOffs] = 0
+			}
+
+			c, _, ok = c.MoveBy(door.Dir, 1)
+		}
+	}
+
+	os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
+
 	return
+}
+
+func isTileCollision(v uint8) bool {
+	// entrance doors:
+	if v == 0x8E || v == 0x8F {
+		return false
+	}
+	// spiral staircases:
+	if v == 0x5E || v == 0x5F {
+		return false
+	}
+
+	isWalkable := v == 0x00 || // no collision
+		v == 0x09 || // shallow water
+		v == 0x22 || // manual stairs
+		v == 0x23 || v == 0x24 || // floor switches
+		(v >= 0x0D && v <= 0x0F) || // spikes / floor ice
+		v == 0x3A || v == 0x3B || // star tiles
+		v == 0x40 || // thick grass
+		v == 0x4B || // warp
+		v == 0x60 || // rupee tile
+		(v >= 0x68 && v <= 0x6B) || // conveyors
+		v == 0xA0 // north/south dungeon swap door (for HC to sewers)
+
+	if isWalkable {
+		return false
+	}
+
+	vClass := v & 0xF0
+
+	isMaybeWalkable := vClass == 0x70 || // pots/pegs/blocks
+		v == 0x62 || // bombable floor
+		v == 0x66 || v == 0x67 // crystal pegs (orange/blue):
+
+	if isMaybeWalkable {
+		return false
+	}
+
+	if vClass == 0x30 || vClass == 0x80 || vClass == 0xF0 {
+		return false
+	}
+
+	return true
+}
+
+func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
+	room = getOrCreateRoom(t, e)
+	st := t.Supertile
+
+	// don't have two or more goroutines clobbering the same room:
+	// NOTE: this causes deadlock if the job queue channel size is too small
+	room.Mutex.Lock()
+	defer room.Mutex.Unlock()
+
+	wram := (e.WRAM)[:]
+	tiles := wram[0x12000:0x14000]
+
+	type SE struct {
+		c MapCoord
+		d Direction
+		s int
+	}
+	lifo := make([]SE, 0, 1024)
+
+	// push starting state:
+	lifo = append(lifo, SE{c: t.Start, d: t.Direction, s: 0})
+
+	fmt.Printf("$%03X: start=%04X dir=%s\n", uint16(t.Supertile), uint16(t.Start), t.Direction)
+
+	// iteratively recurse over processing stack:
+	for len(lifo) > 0 {
+		se := lifo[len(lifo)-1]
+		lifo = lifo[0 : len(lifo)-1]
+
+		if _, ok := room.TilesVisited[se.c]; ok {
+			continue
+		}
+		room.TilesVisited[se.c] = empty{}
+
+		v := tiles[se.c]
+
+		canTraverse := false
+		// fmt.Printf("$%03X: [$%04X]=%02X\n", uint16(st), uint16(se.c), v)
+
+		// transition to neighboring room at the edges:
+		if ok, edgeDir, _, _ := se.c.IsEdge(); ok {
+			if neighborSt, _, ok := st.MoveBy(edgeDir); ok {
+				q.SubmitJob(
+					&ReachTask{
+						InitialEmulator: e,
+						EntranceID:      t.EntranceID,
+						Rooms:           t.Rooms,
+						RoomsLock:       t.RoomsLock,
+						Supertile:       neighborSt,
+						Start:           se.c.OppositeEdge(),
+						Direction:       edgeDir,
+					},
+					ReachTaskInterRoom,
+				)
+			}
+		}
+
+		if v == 0x20 {
+			room.Reachable[se.c] = v
+			room.HasReachablePit = true
+		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(se.c, v) {
+			canTraverse = true
+		} else if v&0xF0 == 0x80 {
+			// shutter doors and entrance doors
+			canTraverse = true
+		} else if v&0xF0 == 0xF0 {
+			// entrances:
+			canTraverse = true
+		}
+
+		if canTraverse {
+			room.Reachable[se.c] = v
+
+			// traverse in 4 directions from here:
+			if c, d, ok := se.c.MoveBy(se.d.Opposite(), 1); ok && room.CanTraverseDir(c, d) {
+				lifo = append(lifo, SE{c: c, d: d, s: 0})
+			}
+			if c, d, ok := se.c.MoveBy(se.d.RotateCW(), 1); ok && room.CanTraverseDir(c, d) {
+				lifo = append(lifo, SE{c: c, d: d, s: 0})
+			}
+			if c, d, ok := se.c.MoveBy(se.d.RotateCCW(), 1); ok && room.CanTraverseDir(c, d) {
+				lifo = append(lifo, SE{c: c, d: d, s: 0})
+			}
+			if c, d, ok := se.c.MoveBy(se.d, 1); ok && room.CanTraverseDir(c, d) {
+				lifo = append(lifo, SE{c: c, d: d, s: 0})
+			}
+		}
+	}
+
+	if room.Rendered == nil {
+		// render BG layers:
+		pal, bg1p, bg2p, addColor, halfColor := renderBGLayers(e.WRAM, e.VRAM[0x4000:0x8000])
+
+		g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+		ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
+
+		// store full underworld rendering for inclusion into EG map:
+		room.Rendered = g
+	}
+
+	return
+}
+
+func (room *RoomState) CanTraverseDir(c MapCoord, d Direction) bool {
+	f := room.AllowDirFlags[c]
+	return f&uint8(1<<d) != 0
 }

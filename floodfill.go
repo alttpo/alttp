@@ -612,9 +612,10 @@ type RoomState struct {
 	TilesVisitedTag0  map[MapCoord]empty
 	TilesVisitedTag1  map[MapCoord]empty
 
-	Tiles     [0x2000]byte
-	Reachable [0x2000]byte
-	Hookshot  map[MapCoord]byte
+	Tiles         [0x2000]byte
+	Reachable     [0x2000]byte
+	Hookshot      map[MapCoord]byte
+	AllowDirFlags [0x2000]uint8
 
 	e               *System
 	WRAM            [0x20000]byte
