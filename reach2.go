@@ -252,7 +252,7 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 
 		// doors only allow bidirectional travel:
 		allowDirFlags := uint8(1<<uint8(door.Dir)) | uint8(1<<uint8(door.Dir.Opposite()))
-		if door.Type == 0x0C || door.Type == 0x0A {
+		if tiles[c] == 0x8E || tiles[c] == 0x8F {
 			// exit/entrance doorways cannot allow exit traversal:
 			allowDirFlags = uint8(1 << uint8(door.Dir.Opposite()))
 		}
@@ -359,6 +359,9 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 		v := tiles[se.c]
 
 		canTraverse := false
+		canTurn := true
+		traverseDir := se.d
+		traverseBy := 1
 		// fmt.Printf("$%03X: [$%04X]=%02X\n", uint16(st), uint16(se.c), v)
 
 		// transition to neighboring room at the edges:
@@ -380,6 +383,7 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 		}
 
 		if v == 0x20 {
+			// pit:
 			room.Reachable[se.c] = v
 			room.HasReachablePit = true
 		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(se.c, v) {
@@ -390,22 +394,49 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 		} else if v&0xF0 == 0xF0 {
 			// entrances:
 			canTraverse = true
+		} else if v == 0x28 {
+			// 28 - North ledge
+			canTraverse = true
+			canTurn = false
+			traverseDir = DirNorth
+			traverseBy = 5
+		} else if v == 0x29 {
+			// 29 - South ledge
+			canTraverse = true
+			canTurn = false
+			traverseDir = DirSouth
+			traverseBy = 5
+		} else if v == 0x2A {
+			// 2A - East ledge
+			canTraverse = true
+			canTurn = false
+			traverseDir = DirEast
+			traverseBy = 5
+		} else if v == 0x2B {
+			// 2B - West ledge
+			canTraverse = true
+			canTurn = false
+			traverseDir = DirWest
+			traverseBy = 5
 		}
 
 		if canTraverse {
 			room.Reachable[se.c] = v
 
-			// traverse in 4 directions from here:
-			if c, d, ok := se.c.MoveBy(se.d.Opposite(), 1); ok && room.CanTraverseDir(c, d) {
-				lifo = append(lifo, SE{c: c, d: d, s: 0})
+			if canTurn {
+				// turn from here:
+				if c, d, ok := room.AttemptTraversal(se.c, traverseDir.Opposite(), traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: 0})
+				}
+				if c, d, ok := room.AttemptTraversal(se.c, traverseDir.RotateCW(), traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: 0})
+				}
+				if c, d, ok := room.AttemptTraversal(se.c, traverseDir.RotateCCW(), traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: 0})
+				}
 			}
-			if c, d, ok := se.c.MoveBy(se.d.RotateCW(), 1); ok && room.CanTraverseDir(c, d) {
-				lifo = append(lifo, SE{c: c, d: d, s: 0})
-			}
-			if c, d, ok := se.c.MoveBy(se.d.RotateCCW(), 1); ok && room.CanTraverseDir(c, d) {
-				lifo = append(lifo, SE{c: c, d: d, s: 0})
-			}
-			if c, d, ok := se.c.MoveBy(se.d, 1); ok && room.CanTraverseDir(c, d) {
+			// traverse in the primary direction:
+			if c, d, ok := room.AttemptTraversal(se.c, traverseDir, traverseBy); ok {
 				lifo = append(lifo, SE{c: c, d: d, s: 0})
 			}
 		}
@@ -428,4 +459,14 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 func (room *RoomState) CanTraverseDir(c MapCoord, d Direction) bool {
 	f := room.AllowDirFlags[c]
 	return f&uint8(1<<d) != 0
+}
+
+func (room *RoomState) AttemptTraversal(c MapCoord, d Direction, by int) (nc MapCoord, nd Direction, ok bool) {
+	if !room.CanTraverseDir(c, d) {
+		nc, nd, ok = c, d, false
+		return
+	}
+
+	nc, nd, ok = c.MoveBy(d, by)
+	return
 }
