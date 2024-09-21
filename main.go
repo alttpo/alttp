@@ -84,6 +84,7 @@ func main() {
 		}
 	}()
 
+	entranceStr := ""
 	entranceMinStr, entranceMaxStr := "", ""
 	oopsAllStr, excludeSpritesStr := "", ""
 	roomListStr := ""
@@ -108,6 +109,7 @@ func main() {
 	flag.IntVar(&animateRoomDrawingDelay, "animdelay", 15, "room drawing GIF frame delay")
 	flag.IntVar(&enemyMovementFrames, "movementframes", 0, "render N frames in animated GIF of enemy movement after room load")
 	flag.StringVar(&roomListStr, "rooms", "", "list of room numbers (hex), comma delimited, ranges with x..y permitted")
+	flag.StringVar(&entranceStr, "ent", "", "single entrance ID (hex)")
 	flag.StringVar(&entranceMinStr, "entmin", "0", "entrance ID range minimum (hex)")
 	flag.StringVar(&entranceMaxStr, "entmax", "84", "entrance ID range maximum (hex)")
 	flag.BoolVar(&staticEntranceMap, "static", false, "use static entrance->supertile map from JP 1.0")
@@ -403,6 +405,16 @@ func main() {
 	}
 	entranceMax = uint8(entranceMax64)
 
+	// override range with single entrance ID:
+	if entranceStr != "" {
+		var v uint64
+		v, err = strconv.ParseUint(entranceStr, 16, 8)
+		if err == nil {
+			entranceMin, entranceMax = uint8(v), uint8(v)
+		}
+	}
+
+	// validate entrance range:
 	if entranceMax < entranceMin {
 		entranceMin, entranceMax = entranceMax, entranceMin
 	}
