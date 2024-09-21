@@ -428,7 +428,7 @@ func main() {
 		roomsLock := sync.Mutex{}
 
 		var nWorkers int
-		if false {
+		if true {
 			nWorkers = runtime.NumCPU()
 		} else {
 			// for debugging

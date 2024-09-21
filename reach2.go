@@ -584,19 +584,40 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				layerSwap = 0
 				se.s = 0
 			}
-		} else if v == 0x1D {
-			// north single-layer auto-stairs:
+		} else if v == 0x1D || v == 0x3D {
+			// north or south single-layer auto-stairs:
+			initialV := v
 			ok := true
 			for i := 0; ok && i < 2; i++ {
 				v = tiles[c]
-				if v != 0x1D {
+				if v != initialV {
 					break
 				}
+				room.Reachable[c] = v
+				room.TilesVisited[c] = empty{}
 				c, _, ok = c.MoveBy(se.d, 1)
 			}
 			if ok {
 				canTraverse = true
 				canTurn = false
+			}
+		} else if v == 0x1E || v == 0x1F || v == 0x3E || v == 0x3F {
+			// north or south layer-toggle auto-stairs:
+			initialV := v
+			ok := true
+			for i := 0; ok && i < 2; i++ {
+				v = tiles[c]
+				if v != initialV {
+					break
+				}
+				room.Reachable[c] = v
+				room.TilesVisited[c] = empty{}
+				c, _, ok = c.MoveBy(se.d, 1)
+			}
+			if ok {
+				canTraverse = true
+				canTurn = false
+				c ^= 0x1000
 			}
 		} else if v&0xF0 == 0x80 {
 			// shutter doors and entrance doors
