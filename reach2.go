@@ -111,8 +111,21 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 
 	reachTaskFloodfill(q, t, room)
 
-	// mark Link's entry position:
-	room.Reachable[t.SE.c] = 0xFF
+	// outline Link's starting position with entranceID
+	drawOutlineBox(
+		room.RenderedNRGBA,
+		image.NewUniform(color.RGBA{255, 255, 0, 255}),
+		int(t.SE.c.Col())*8,
+		int(t.SE.c.Row())*8,
+		16,
+		16,
+	)
+	drawShadowedString(
+		room.RenderedNRGBA,
+		image.NewUniform(color.RGBA{255, 255, 0, 255}),
+		fixed.Point26_6{X: fixed.I(int(t.SE.c.Col())*8 + 1), Y: fixed.I(int(t.SE.c.Row())*8 + 14)},
+		fmt.Sprintf("%02X", uint8(t.EntranceID)),
+	)
 }
 
 func getOrCreateRoom(t T, e *System) (room *RoomState) {
@@ -389,20 +402,13 @@ func createRoom(t T, e *System) (room *RoomState) {
 		g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
 		ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
 
-		drawShadowedString(
-			g,
-			image.White,
-			fixed.Point26_6{X: fixed.I(0x3c*8 + 4), Y: fixed.I(0x01*8 + 12)},
-			fmt.Sprintf("%02X", uint8(t.EntranceID)),
-		)
-
 		// overlay doors in blue rectangles:
 		clrBlue := image.NewUniform(color.NRGBA{0, 0, 255, 192})
 		for _, door := range room.Doors {
 			drawShadowedString(
 				g,
 				image.White,
-				fixed.Point26_6{X: fixed.I(int(door.Pos.Col()*8) + 4), Y: fixed.I(int(door.Pos.Row()*8) + 12)},
+				fixed.Point26_6{X: fixed.I(int(door.Pos.Col()*8) + 8), Y: fixed.I(int(door.Pos.Row()*8) - 2)},
 				fmt.Sprintf("%02X", uint8(door.Type)),
 			)
 			drawOutlineBox(
@@ -513,14 +519,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	lifo = append(lifo, t.SE)
 
 	fmt.Printf("$%03X: start=%04X dir=%s\n", uint16(t.Supertile), uint16(t.SE.c), t.SE.d)
-	drawOutlineBox(
-		room.RenderedNRGBA,
-		image.NewUniform(color.RGBA{255, 255, 255, 255}),
-		int(t.SE.c.Col())*8,
-		int(t.SE.c.Row())*8,
-		8,
-		8,
-	)
 
 	// iteratively recurse over processing stack:
 	for len(lifo) > 0 {
