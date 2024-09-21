@@ -442,7 +442,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 
 func tileAllowableDirFlags(v uint8) uint8 {
 	// north/south doorways:
-	if v == 0x80 || v == 0x82 || v == 0x84 || v == 0x86 || v == 0x8E || v == 0x8F || v == 0xA0 {
+	if v == 0x80 || v == 0x82 || v == 0x84 || v == 0x86 || v == 0x8E || v == 0x8F || v == 0xA0 ||
+		v == 0x5E || v == 0x5F || v&0xF8 == 0x30 || v == 0x38 || v == 0x39 {
 		return 0b0000_0011
 	}
 	// east/west doorways:
@@ -641,14 +642,82 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				canTurn = false
 				c ^= 0x1000
 			}
-		} else if v&0xF0 == 0x80 {
-			// shutter doors and entrance doors
-			canTraverse = true
-			canTurn = false
-		} else if v&0xF0 == 0xF0 {
-			// doorways:
-			canTraverse = true
-			canTurn = false
+		} else if v == 0x5E || v == 0x5F || v&0xF8 == 0x30 {
+			// spiral staircase or stairwell
+			room.Reachable[c] = v
+			stairExit := v
+			stairKind := v
+
+			fmt.Printf(
+				"$%03X: debug stairs {%02X, %02X, %02X, %02X}\n",
+				uint16(t.Supertile),
+				tiles[c],
+				tiles[c-0x40],
+				tiles[c-0x80],
+				tiles[c-0xC0],
+			)
+
+			// determine the real stair kind:
+			if v == 0x5E || v == 0x5F {
+				// spiral staircases have the real stair tile at +2 north:
+				cs, _, _ := c.MoveBy(traverseDir, 2)
+				stairExit = tiles[cs]
+			} else {
+				// otherwise use the immediate tile at +1 north:
+				cs, _, _ := c.MoveBy(traverseDir, 1)
+				stairKind = tiles[cs]
+				if stairKind == 0 {
+					stairKind = stairExit
+				}
+			}
+
+			if stairKind == 0x38 {
+				// TODO
+			} else {
+				// inter-room stairs:
+				neighborSt := room.StairExitTo[stairExit&3]
+				traverseDir = DirSouth
+
+				// move outside of the stair tile:
+				ct, _, _ := c.MoveBy(traverseDir, 1)
+				// set destination layer:
+				ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
+				if stairExit&0x04 == 0 {
+					// going up
+					if c&0x1000 != 0 {
+						ct += 0x80
+					}
+					if ct&0x1000 != 0 {
+						ct += 0x80
+					}
+				} else {
+					// going down
+					traverseDir = DirSouth
+					if c&0x1000 != 0 {
+						ct -= 0x80
+					}
+					if ct&0x1000 != 0 {
+						ct -= 0x80
+					}
+				}
+				fmt.Printf("$%03X: stairs $%04X exit to $%03X at $%04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
+				q.SubmitJob(
+					&ReachTask{
+						InitialEmulator: room.e,
+						EntranceID:      t.EntranceID,
+						Rooms:           t.Rooms,
+						RoomsLock:       t.RoomsLock,
+						Supertile:       neighborSt,
+						SE: SE{
+							c: ct,
+							d: traverseDir,
+							s: se.s,
+						},
+					},
+					ReachTaskInterRoom,
+				)
+				continue
+			}
 		} else if v == 0x28 {
 			// 28 - North ledge
 			canTraverse = true
@@ -677,6 +746,14 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			// pit:
 			room.Reachable[c] = v
 			room.HasReachablePit = true
+		} else if v&0xF0 == 0x80 {
+			// shutter doors and entrance doors
+			canTraverse = true
+			canTurn = false
+		} else if v&0xF0 == 0xF0 {
+			// doorways:
+			canTraverse = true
+			canTurn = false
 		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
 			canTraverse = true
 		}
@@ -729,8 +806,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			lifo = append(lifo, SE{c: c, d: d, s: se.s})
 		}
 	}
-
-	return
 }
 
 func (room *RoomState) CanTraverseDir(c MapCoord, d Direction) bool {
