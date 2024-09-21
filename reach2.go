@@ -55,7 +55,9 @@ func ReachTaskInterRoom(q Q, t T) {
 	}
 	//e.LoggerCPU = nil
 
-	reachTaskFloodfill(q, t, e)
+	room := getOrCreateRoom(t, e)
+
+	reachTaskFloodfill(q, t, room)
 }
 
 func ReachTaskFromEntranceWorker(q Q, t T) {
@@ -95,7 +97,8 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 	t.SE.d = linkD
 	t.SE.s = 0
 
-	room := reachTaskFloodfill(q, t, e)
+	room := getOrCreateRoom(t, e)
+	reachTaskFloodfill(q, t, room)
 
 	// mark Link's entry position:
 	room.Reachable[t.SE.c] = 0xFF
@@ -398,6 +401,9 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 		room.RenderedNRGBA = g
 	}
 
+	copy(room.WRAM[:], (*e.WRAM)[:])
+	copy(room.VRAMTileSet[:], (*e.VRAM)[:])
+
 	return
 }
 
@@ -464,9 +470,11 @@ func isTileCollision(v uint8) bool {
 	return true
 }
 
-func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
-	room = getOrCreateRoom(t, e)
+func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	st := t.Supertile
+	e := room.e
+	copy((*e.WRAM)[:], room.WRAM[:])
+	copy((*e.VRAM)[:], room.VRAMTileSet[:])
 
 	// don't have two or more goroutines clobbering the same room:
 	// NOTE: this causes deadlock if the job queue channel size is too small
