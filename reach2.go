@@ -156,6 +156,7 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 	t.Rooms[uint16(t.Supertile)] = room
 
 	// do first-time room processing work:
+	// fmt.Printf("$%03X: room init\n", uint16(t.Supertile))
 
 	wram := (e.WRAM)[:]
 	tiles := wram[0x12000:0x14000]
@@ -534,6 +535,7 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 					}
 				} else if v != initialV {
 					// stop when we're out of the doorway tiles
+					fmt.Printf("$%03X: doorway stop $%04X %s\n", uint16(t.Supertile), uint16(c), se.d)
 					se.s = 0
 					break
 				}
@@ -569,17 +571,25 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 					continue
 				}
 			} else {
-				// if we did not hit the edge then just do the layer swap:
+				// if we did not hit the edge then just do the layer swap if applicable:
 				c ^= layerSwap
 				layerSwap = 0
 				se.s = 0
 			}
-		} else if v == 0x20 {
-			// pit:
-			room.Reachable[c] = v
-			room.HasReachablePit = true
-		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
-			canTraverse = true
+		} else if v == 0x1D {
+			// north single-layer auto-stairs:
+			ok := true
+			for i := 0; ok && i < 2; i++ {
+				v = tiles[c]
+				if v != 0x1D {
+					break
+				}
+				c, _, ok = c.MoveBy(se.d, 1)
+			}
+			if ok {
+				canTraverse = true
+				canTurn = false
+			}
 		} else if v&0xF0 == 0x80 {
 			// shutter doors and entrance doors
 			canTraverse = true
@@ -612,52 +622,60 @@ func reachTaskFloodfill(q Q, t T, e *System) (room *RoomState) {
 			canTurn = false
 			traverseDir = DirWest
 			traverseBy = 5
+		} else if v == 0x20 {
+			// pit:
+			room.Reachable[c] = v
+			room.HasReachablePit = true
+		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
+			canTraverse = true
 		}
 
-		if canTraverse {
-			room.Reachable[c] = v
+		if !canTraverse {
+			continue
+		}
 
-			// transition to neighboring room at the edges:
-			if ok, edgeDir, _, _ := c.IsEdge(); ok {
-				if traverseDir == edgeDir && room.CanTraverseDir(c, traverseDir) {
-					if neighborSt, _, ok := st.MoveBy(traverseDir); ok {
-						fmt.Printf("$%03X: edge $%04X %s exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
-						q.SubmitJob(
-							&ReachTask{
-								InitialEmulator: e,
-								EntranceID:      t.EntranceID,
-								Rooms:           t.Rooms,
-								RoomsLock:       t.RoomsLock,
-								Supertile:       neighborSt,
-								SE: SE{
-									c: c.OppositeEdge() ^ layerSwap,
-									d: traverseDir,
-									s: se.s,
-								},
+		room.Reachable[c] = v
+
+		// transition to neighboring room at the edges:
+		if ok, edgeDir, _, _ := c.IsEdge(); ok {
+			if traverseDir == edgeDir && room.CanTraverseDir(c, traverseDir) {
+				if neighborSt, _, ok := st.MoveBy(traverseDir); ok {
+					fmt.Printf("$%03X: edge $%04X %s exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
+					q.SubmitJob(
+						&ReachTask{
+							InitialEmulator: e,
+							EntranceID:      t.EntranceID,
+							Rooms:           t.Rooms,
+							RoomsLock:       t.RoomsLock,
+							Supertile:       neighborSt,
+							SE: SE{
+								c: c.OppositeEdge() ^ layerSwap,
+								d: traverseDir,
+								s: se.s,
 							},
-							ReachTaskInterRoom,
-						)
-						continue
-					}
+						},
+						ReachTaskInterRoom,
+					)
+					continue
 				}
 			}
+		}
 
-			if canTurn {
-				// turn from here:
-				if c, d, ok := room.AttemptTraversal(c, traverseDir.Opposite(), traverseBy); ok {
-					lifo = append(lifo, SE{c: c, d: d, s: se.s})
-				}
-				if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCW(), traverseBy); ok {
-					lifo = append(lifo, SE{c: c, d: d, s: se.s})
-				}
-				if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCCW(), traverseBy); ok {
-					lifo = append(lifo, SE{c: c, d: d, s: se.s})
-				}
-			}
-			// traverse in the primary direction:
-			if c, d, ok := room.AttemptTraversal(c, traverseDir, traverseBy); ok {
+		if canTurn {
+			// turn from here:
+			if c, d, ok := room.AttemptTraversal(c, traverseDir.Opposite(), traverseBy); ok {
 				lifo = append(lifo, SE{c: c, d: d, s: se.s})
 			}
+			if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCW(), traverseBy); ok {
+				lifo = append(lifo, SE{c: c, d: d, s: se.s})
+			}
+			if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCCW(), traverseBy); ok {
+				lifo = append(lifo, SE{c: c, d: d, s: se.s})
+			}
+		}
+		// traverse in the primary direction:
+		if c, d, ok := room.AttemptTraversal(c, traverseDir, traverseBy); ok {
+			lifo = append(lifo, SE{c: c, d: d, s: se.s})
 		}
 	}
 

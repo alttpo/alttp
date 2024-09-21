@@ -426,7 +426,15 @@ func main() {
 	if true {
 		roomsMap := make(map[uint16]*RoomState)
 		roomsLock := sync.Mutex{}
-		q := taskqueue.NewQ(runtime.NumCPU(), 0x1000, ReachTaskFromEntranceWorker)
+
+		var nWorkers int
+		if false {
+			nWorkers = runtime.NumCPU()
+		} else {
+			// for debugging
+			nWorkers = 1
+		}
+		q := taskqueue.NewQ(nWorkers, 0x1000, ReachTaskFromEntranceWorker)
 
 		// eIDmin, eIDmax := uint8(0), uint8(0x84)
 		for eID := entranceMin; eID <= entranceMax; eID++ {
