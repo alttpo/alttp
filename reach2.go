@@ -218,12 +218,20 @@ func createRoom(t T, e *System) (room *RoomState) {
 				tiles[t+0x01] = 0x00
 				tiles[t+0x40] = 0x00
 				tiles[t+0x41] = 0x00
+				room.AllowDirFlags[t+0x00] = tileAllowableDirFlags(0)
+				room.AllowDirFlags[t+0x01] = tileAllowableDirFlags(0)
+				room.AllowDirFlags[t+0x40] = tileAllowableDirFlags(0)
+				room.AllowDirFlags[t+0x41] = tileAllowableDirFlags(0)
 			}
 			if tiles[t|0x1000] == 0x58+uint8(i) {
 				tiles[t|0x1000+0x00] = 0x00
 				tiles[t|0x1000+0x01] = 0x00
 				tiles[t|0x1000+0x40] = 0x00
 				tiles[t|0x1000+0x41] = 0x00
+				room.AllowDirFlags[t+0x00] = tileAllowableDirFlags(0)
+				room.AllowDirFlags[t+0x01] = tileAllowableDirFlags(0)
+				room.AllowDirFlags[t+0x40] = tileAllowableDirFlags(0)
+				room.AllowDirFlags[t+0x41] = tileAllowableDirFlags(0)
 			}
 		}
 	}
@@ -251,6 +259,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 				for r := 0; r < 12; r++ {
 					tiles[pos+(r<<6)-c] = 0
 					tiles[pos+(r<<6)+1+c] = 0
+					room.AllowDirFlags[pos+(r<<6)-c] = tileAllowableDirFlags(0)
+					room.AllowDirFlags[pos+(r<<6)+1+c] = tileAllowableDirFlags(0)
 				}
 			}
 			continue
