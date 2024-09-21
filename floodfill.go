@@ -582,8 +582,9 @@ type RoomState struct {
 
 	IsLoaded bool
 
-	Rendered image.Image
-	GIF      gif.GIF
+	Rendered      image.Image
+	RenderedNRGBA *image.NRGBA
+	GIF           gif.GIF
 
 	Animated        gif.GIF // single room drawing animation
 	AnimatedTileMap [][0x4000]byte
