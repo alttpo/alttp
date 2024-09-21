@@ -37,25 +37,35 @@ type Q = *taskqueue.Q[T]
 func ReachTaskInterRoom(q Q, t T) {
 	var err error
 
-	e := &System{}
-	if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
-		panic(err)
+	var room *RoomState
+	var ok bool
+
+	t.RoomsLock.Lock()
+	if room, ok = t.Rooms[uint16(t.Supertile)]; !ok {
+		e := &System{}
+		if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
+			panic(err)
+		}
+
+		st := t.Supertile
+		wram := (e.WRAM)[:]
+
+		// load and draw current supertile:
+		write16(wram, 0xA0, uint16(st))
+		write16(wram, 0x048E, uint16(st))
+
+		//e.LoggerCPU = e.Logger
+		if err = e.ExecAt(loadSupertilePC, donePC); err != nil {
+			panic(err)
+		}
+		//e.LoggerCPU = nil
+
+		room = createRoom(t, e)
+		t.Rooms[uint16(t.Supertile)] = room
 	}
-
-	st := t.Supertile
-	wram := (e.WRAM)[:]
-
-	// load and draw current supertile:
-	write16(wram, 0xA0, uint16(st))
-	write16(wram, 0x048E, uint16(st))
-
-	//e.LoggerCPU = e.Logger
-	if err = e.ExecAt(loadSupertilePC, donePC); err != nil {
-		panic(err)
-	}
-	//e.LoggerCPU = nil
-
-	room := getOrCreateRoom(t, e)
+	copy((*room.e.WRAM)[:], room.WRAM[:])
+	copy((*room.e.VRAM)[:], room.VRAMTileSet[:])
+	t.RoomsLock.Unlock()
 
 	reachTaskFloodfill(q, t, room)
 }
@@ -98,6 +108,7 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 	t.SE.s = 0
 
 	room := getOrCreateRoom(t, e)
+
 	reachTaskFloodfill(q, t, room)
 
 	// mark Link's entry position:
@@ -114,6 +125,13 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 		return
 	}
 
+	room = createRoom(t, e)
+	t.Rooms[uint16(t.Supertile)] = room
+
+	return
+}
+
+func createRoom(t T, e *System) (room *RoomState) {
 	// create new room:
 	room = &RoomState{
 		Supertile: t.Supertile,
@@ -156,12 +174,11 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 		lifo:             []ScanState{},
 		HasReachablePit:  false,
 	}
-	t.Rooms[uint16(t.Supertile)] = room
 
 	// do first-time room processing work:
 	// fmt.Printf("$%03X: room init\n", uint16(t.Supertile))
 
-	wram := (e.WRAM)[:]
+	wram := (*e.WRAM)[:]
 	tiles := wram[0x12000:0x14000]
 
 	for i := range room.Reachable {
@@ -225,6 +242,8 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 			Type: DoorType(read16(wram, uint32(0x1980+(m<<1)))),
 			Dir:  Direction(read16(wram, uint32(0x19C0+(m<<1)))),
 		}
+		room.Doors = append(room.Doors, door)
+
 		if door.Type == 0x30 {
 			// exploding wall:
 			pos := int(door.Pos)
@@ -236,8 +255,6 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 			}
 			continue
 		}
-
-		room.Doors = append(room.Doors, door)
 
 		var ok bool
 		var c MapCoord
@@ -471,17 +488,14 @@ func isTileCollision(v uint8) bool {
 }
 
 func reachTaskFloodfill(q Q, t T, room *RoomState) {
-	st := t.Supertile
-	e := room.e
-	copy((*e.WRAM)[:], room.WRAM[:])
-	copy((*e.VRAM)[:], room.VRAMTileSet[:])
-
 	// don't have two or more goroutines clobbering the same room:
 	// NOTE: this causes deadlock if the job queue channel size is too small
 	room.Mutex.Lock()
 	defer room.Mutex.Unlock()
 
-	wram := (e.WRAM)[:]
+	st := t.Supertile
+
+	wram := room.WRAM
 	tiles := wram[0x12000:0x14000]
 
 	// push starting state:
@@ -563,7 +577,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					fmt.Printf("$%03X: edge $%04X %s teleport exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
 					q.SubmitJob(
 						&ReachTask{
-							InitialEmulator: e,
+							InitialEmulator: room.e,
 							EntranceID:      t.EntranceID,
 							Rooms:           t.Rooms,
 							RoomsLock:       t.RoomsLock,
@@ -672,7 +686,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					fmt.Printf("$%03X: edge $%04X %s exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
 					q.SubmitJob(
 						&ReachTask{
-							InitialEmulator: e,
+							InitialEmulator: room.e,
 							EntranceID:      t.EntranceID,
 							Rooms:           t.Rooms,
 							RoomsLock:       t.RoomsLock,
