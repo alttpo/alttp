@@ -199,12 +199,12 @@ func createRoom(t T, e *System) (room *RoomState) {
 		room.AllowDirFlags[i] = tileAllowableDirFlags(tiles[i])
 	}
 
-	room.WarpExitTo = Supertile(read8(wram, 0xC000))
+	room.WarpExitTo = Supertile(read8(wram, 0xC000)) | (t.Supertile & 0x100)
 	room.StairExitTo = [4]Supertile{
-		Supertile(read8(wram, uint32(0xC001))),
-		Supertile(read8(wram, uint32(0xC002))),
-		Supertile(read8(wram, uint32(0xC003))),
-		Supertile(read8(wram, uint32(0xC004))),
+		Supertile(read8(wram, uint32(0xC001))) | (t.Supertile & 0x100),
+		Supertile(read8(wram, uint32(0xC002))) | (t.Supertile & 0x100),
+		Supertile(read8(wram, uint32(0xC003))) | (t.Supertile & 0x100),
+		Supertile(read8(wram, uint32(0xC004))) | (t.Supertile & 0x100),
 	}
 	room.WarpExitLayer = MapCoord(read8(wram, uint32(0x063C))&2) << 11
 	room.StairTargetLayer = [4]MapCoord{
@@ -642,81 +642,102 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				canTurn = false
 				c ^= 0x1000
 			}
-		} else if v == 0x5E || v == 0x5F || v&0xF8 == 0x30 {
-			// spiral staircase or stairwell
-			room.Reachable[c] = v
-			stairExit := v
-			stairKind := v
-
+		} else if v == 0x5E || v == 0x5F || v&0xF8 == 0x30 || v&0xF0 == 0xF0 {
+			// doors may cover in front of stairs
 			fmt.Printf(
-				"$%03X: debug stairs {%02X, %02X, %02X, %02X}\n",
+				"$%03X: debug stairs at %04X {%02X, %02X, %02X, %02X}\n",
 				uint16(t.Supertile),
+				uint16(c),
 				tiles[c],
 				tiles[c-0x40],
 				tiles[c-0x80],
 				tiles[c-0xC0],
 			)
 
-			// determine the real stair kind:
-			if v == 0x5E || v == 0x5F {
-				// spiral staircases have the real stair tile at +2 north:
-				cs, _, _ := c.MoveBy(traverseDir, 2)
-				stairExit = tiles[cs]
-			} else {
-				// otherwise use the immediate tile at +1 north:
-				cs, _, _ := c.MoveBy(traverseDir, 1)
-				stairKind = tiles[cs]
-				if stairKind == 0 {
-					stairKind = stairExit
+			room.Reachable[c] = v
+
+			// find the stair tile:
+			var stairExit byte
+			var stairKind byte
+			for i := 0; i < 4; i++ {
+				cs, _, _ := c.MoveBy(traverseDir, i)
+				v = tiles[cs]
+				room.Reachable[cs] = v
+				if v >= 0x30 && v <= 0x37 {
+					stairExit = v
+					if stairKind == 0 {
+						stairKind = v
+					}
+				} else if v >= 0x38 && v <= 0x39 {
+					stairKind = v
+				} else if v == 0x5E || v == 0x5F {
+					continue
+				} else if v&0xF0 == 0xF0 {
+					continue
+				} else {
+					break
 				}
 			}
 
-			if stairKind == 0x38 {
-				// TODO
+			if stairKind == 0 {
+				canTraverse = true
+				canTurn = false
 			} else {
-				// inter-room stairs:
-				neighborSt := room.StairExitTo[stairExit&3]
-				traverseDir = DirSouth
+				// move south of the stair tile:
+				ct, _, _ := c.MoveBy(traverseDir.Opposite(), 1)
 
-				// move outside of the stair tile:
-				ct, _, _ := c.MoveBy(traverseDir, 1)
-				// set destination layer:
-				ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
-				if stairExit&0x04 == 0 {
-					// going up
-					if c&0x1000 != 0 {
-						ct += 0x80
-					}
-					if ct&0x1000 != 0 {
-						ct += 0x80
-					}
-				} else {
-					// going down
-					traverseDir = DirSouth
-					if c&0x1000 != 0 {
-						ct -= 0x80
-					}
-					if ct&0x1000 != 0 {
-						ct -= 0x80
-					}
-				}
-				fmt.Printf("$%03X: stairs $%04X exit to $%03X at $%04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
-				q.SubmitJob(
-					&ReachTask{
-						InitialEmulator: room.e,
-						EntranceID:      t.EntranceID,
-						Rooms:           t.Rooms,
-						RoomsLock:       t.RoomsLock,
-						Supertile:       neighborSt,
-						SE: SE{
-							c: ct,
-							d: traverseDir,
-							s: se.s,
-						},
-					},
-					ReachTaskInterRoom,
+				fmt.Printf(
+					"$%03X: debug stairs at %04X exit=%02X, kind=%02X\n",
+					uint16(t.Supertile),
+					uint16(c),
+					stairExit,
+					stairKind,
 				)
-				continue
+
+				if stairKind == 0x38 || stairKind == 0x39 {
+					// TODO
+				} else if stairKind >= 0x30 && stairKind <= 0x37 {
+					// inter-room stairs:
+					neighborSt := room.StairExitTo[stairExit&3]
+					traverseDir = DirSouth
+
+					// set destination layer:
+					ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
+					if stairExit&0x04 == 0 {
+						// going up
+						if c&0x1000 != 0 {
+							ct += 0x80
+						}
+						if ct&0x1000 != 0 {
+							ct += 0x80
+						}
+					} else {
+						// going down
+						if c&0x1000 != 0 {
+							ct -= 0x80
+						}
+						if ct&0x1000 != 0 {
+							ct -= 0x80
+						}
+					}
+					fmt.Printf("$%03X: stairs $%04X exit to $%03X at $%04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
+					q.SubmitJob(
+						&ReachTask{
+							InitialEmulator: room.e,
+							EntranceID:      t.EntranceID,
+							Rooms:           t.Rooms,
+							RoomsLock:       t.RoomsLock,
+							Supertile:       neighborSt,
+							SE: SE{
+								c: ct,
+								d: traverseDir,
+								s: se.s,
+							},
+						},
+						ReachTaskInterRoom,
+					)
+					continue
+				}
 			}
 		} else if v == 0x28 {
 			// 28 - North ledge
