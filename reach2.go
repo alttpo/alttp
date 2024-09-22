@@ -661,7 +661,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				} else if v >= 0x38 && v <= 0x39 {
 					stairKind = v
 				} else if v == 0x5E || v == 0x5F {
-					continue
+					stairKind = v
 				} else if v&0xF0 == 0xF0 {
 					continue
 				} else {
@@ -739,7 +739,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 							ct += 0xC0
 						}
 					}
-				} else if stairKind >= 0x30 && stairKind <= 0x37 {
+				} else if stairKind == 0x5E || stairKind == 0x5F {
 					// inter-room stairs:
 					neighborSt = room.StairExitTo[stairExit&3]
 					traverseDir = DirSouth
@@ -750,21 +750,26 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					// adjust destination based on layer swap:
 					if stairExit&0x04 == 0 {
 						// going up
-						if c&0x1000 != 0 {
-							ct += 0x80
-						}
-						if ct&0x1000 != 0 {
-							ct += 0x80
+						if c.IsLayer2() && !ct.IsLayer2() {
+							ct -= 0xC0
+						} else if !c.IsLayer2() && ct.IsLayer2() {
+							ct += 0xC0
 						}
 					} else {
 						// going down
-						if c&0x1000 != 0 {
-							ct -= 0x80
-						}
-						if ct&0x1000 != 0 {
-							ct -= 0x80
+						if c.IsLayer2() && !ct.IsLayer2() {
+							ct -= 0xC0
+						} else if !c.IsLayer2() && ct.IsLayer2() {
+							ct += 0xC0
 						}
 					}
+				} else if stairKind >= 0x30 && stairKind <= 0x37 {
+					// straight inter-room stairs:
+					neighborSt = room.StairExitTo[stairExit&3]
+					ct, _, _ = c.MoveBy(traverseDir, 1)
+
+					// set destination layer:
+					ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
 				}
 
 				fmt.Printf("$%03X: stairs $%04X exit to $%03X at $%04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
