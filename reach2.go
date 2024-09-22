@@ -790,6 +790,27 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				)
 				continue
 			}
+		} else if v == 0x4B {
+			// 4B - warp tile
+			neighborSt := room.WarpExitTo
+			ct := c | room.WarpExitLayer
+			fmt.Printf("$%03X: warp $%04X exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
+			q.SubmitJob(
+				&ReachTask{
+					InitialEmulator: room.e,
+					EntranceID:      t.EntranceID,
+					Rooms:           t.Rooms,
+					RoomsLock:       t.RoomsLock,
+					Supertile:       neighborSt,
+					SE: SE{
+						c: ct,
+						d: traverseDir,
+						s: se.s,
+					},
+				},
+				ReachTaskInterRoom,
+			)
+			canTraverse = true
 		} else if v == 0x28 {
 			// 28 - North ledge
 			canTraverse = true
