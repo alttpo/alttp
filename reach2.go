@@ -443,11 +443,11 @@ func createRoom(t T, e *System) (room *RoomState) {
 func tileAllowableDirFlags(v uint8) uint8 {
 	// north/south doorways:
 	if v == 0x80 || v == 0x82 || v == 0x84 || v == 0x86 || v == 0x8E || v == 0x8F || v == 0xA0 ||
-		v == 0x5E || v == 0x5F || v&0xF8 == 0x30 || v == 0x38 || v == 0x39 {
+		v == 0x5E || v == 0x5F || v&0xF8 == 0x30 || v == 0x38 || v == 0x39 || v == 0x28 || v == 0x29 {
 		return 0b0000_0011
 	}
 	// east/west doorways:
-	if v == 0x81 || v == 0x83 || v == 0x85 || v == 0x87 || v == 0x89 {
+	if v == 0x81 || v == 0x83 || v == 0x85 || v == 0x87 || v == 0x89 || v == 0x2A || v == 0x2B {
 		return 0b0000_1100
 	}
 
@@ -950,28 +950,36 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			se.s = 3
 		} else if v == 0x28 {
 			// 28 - North ledge
-			canTraverse = true
 			canTurn = false
-			traverseDir = DirNorth
-			traverseBy = 5
+			if traverseDir == DirNorth || traverseDir == DirSouth {
+				canTraverse = true
+				// traverseDir = DirNorth
+				traverseBy = 5
+			}
 		} else if v == 0x29 {
 			// 29 - South ledge
-			canTraverse = true
 			canTurn = false
-			traverseDir = DirSouth
-			traverseBy = 5
+			if traverseDir == DirNorth || traverseDir == DirSouth {
+				canTraverse = true
+				// traverseDir = DirSouth
+				traverseBy = 5
+			}
 		} else if v == 0x2A {
 			// 2A - East ledge
-			canTraverse = true
 			canTurn = false
-			traverseDir = DirEast
-			traverseBy = 5
+			if traverseDir == DirWest || traverseDir == DirEast {
+				canTraverse = true
+				// traverseDir = DirEast
+				traverseBy = 5
+			}
 		} else if v == 0x2B {
 			// 2B - West ledge
-			canTraverse = true
 			canTurn = false
-			traverseDir = DirWest
-			traverseBy = 5
+			if traverseDir == DirWest || traverseDir == DirEast {
+				canTraverse = true
+				// traverseDir = DirWest
+				traverseBy = 5
+			}
 		} else if v == 0x20 {
 			// pit:
 			room.Reachable[c] = v
