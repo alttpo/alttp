@@ -34,10 +34,9 @@ func renderAll(fname string, rooms []*RoomState, rowStart int, rowCount int) {
 		image.Point{},
 		draw.Src)
 
-	greenTint := image.NewUniform(color.NRGBA{0, 255, 0, 48})
-	redTint := image.NewUniform(color.NRGBA{255, 0, 0, 80})
-	yellowTint := image.NewUniform(color.NRGBA{255, 255, 0, 96})
-	cyanTint := image.NewUniform(color.NRGBA{0, 255, 255, 48})
+	greenTint := image.NewUniform(color.NRGBA{255, 255, 0, 64})
+	redTint := image.NewUniform(color.NRGBA{255, 0, 0, 96})
+	cyanTint := image.NewUniform(color.NRGBA{0, 255, 255, 64})
 	blueTint := image.NewUniform(color.NRGBA{0, 0, 255, 48})
 
 	black := image.NewUniform(color.RGBA{0, 0, 0, 255})
@@ -144,9 +143,6 @@ func renderAll(fname string, rooms []*RoomState, rowStart int, rowCount int) {
 					}
 					if v == 0x20 || v == 0x62 {
 						overlay = redTint
-					}
-					if v == 0xFF {
-						overlay = yellowTint
 					}
 
 					x := int(tc) << 3
