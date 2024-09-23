@@ -503,6 +503,11 @@ func isTileCollision(v uint8) bool {
 		return false
 	}
 
+	// moving floor:
+	if v == 0x1C || v == 0x0C {
+		return false
+	}
+
 	isWalkable := v == 0x00 || // no collision
 		v == 0x09 || // shallow water
 		v == 0x22 || // manual stairs
@@ -980,6 +985,15 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// traverseDir = DirWest
 				traverseBy = 5
 			}
+		} else if v == 0x1C && !c.IsLayer2() {
+			if tiles[c|0x1000] == 0x0C {
+				canTraverse = true
+				canTurn = true
+			} else {
+				// transition from layer 1 to layer 2:
+				fmt.Printf("$%03X: fall $%04X\n", uint16(t.Supertile), uint16(c))
+				lifo = append(lifo, SE{c: c | 0x1000, d: traverseDir, s: se.s})
+			}
 		} else if v == 0x20 || v == 0x62 {
 			// pit or bombable floor:
 			room.Reachable[c] = v
@@ -997,7 +1011,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 						RoomsLock:       t.RoomsLock,
 						Supertile:       neighborSt,
 						SE: SE{
-							c: c,
+							c: ct,
 							d: traverseDir,
 							s: se.s,
 						},
@@ -1009,34 +1023,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// start somaria from across a pit:
 				lifo = append(lifo, SE{c: ct, d: traverseDir, s: 2})
 			}
-			// check for bonkable block in the opposite direction to allow reverse-bonk-over-pit:
-			if cb, _, ok := c.MoveBy(traverseDir.Opposite(), 3); ok && isTileCollision(tiles[cb]) {
-				// ideally bonk against 0x27 tile
-				// can we cross the pit?
-				if ct, _, ok := c.MoveBy(traverseDir, 6); ok && room.isAlwaysWalkable(tiles[ct]) {
-					// prove all tiles in between are pit:
-					allPits := true
-					for i := 0; i < 6; i++ {
-						if ct, _, ok = c.MoveBy(traverseDir, i); !ok {
-							allPits = false
-							break
-						}
-						if tiles[ct] == 0x20 {
-							continue
-						} else if isTileCollision(tiles[ct]) {
-							continue
-						} else if room.isAlwaysWalkable(tiles[ct]) {
-							continue
-						}
-						allPits = false
-						break
-					}
-					if allPits {
-						fmt.Printf("$%03X: pit bonk skip at $%04X\n", uint16(t.Supertile), uint16(c))
-						lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
-					}
-				}
-			}
 		} else if v&0xF0 == 0x80 {
 			// shutter doors and entrance doors
 			canTraverse = true
@@ -1045,6 +1031,56 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			// doorways:
 			canTraverse = true
 			canTurn = false
+		} else if v == 0x27 || v&0xF0 == 0x70 {
+			// can we bonk cross a pit from here?
+			for d := DirNorth; d < DirNone; d++ {
+				// need a place to bonk from:
+				canBonk := true
+				ct, _, ok := c.MoveBy(d, 1)
+				if !ok {
+					canBonk = false
+				}
+				if !room.isAlwaysWalkable(tiles[ct]) {
+					canBonk = false
+				}
+				ct, _, ok = c.MoveBy(d, 2)
+				if !ok {
+					canBonk = false
+				}
+				if !room.isAlwaysWalkable(tiles[ct]) {
+					canBonk = false
+				}
+
+				if canBonk {
+					// prove all tiles in between are pit:
+					hasPit := false
+					ct = c
+					for i := 1; i <= 9; i++ {
+						if ct, _, ok = ct.MoveBy(d, 1); !ok {
+							canBonk = false
+							break
+						}
+						if tiles[ct] == 0x20 {
+							hasPit = true
+							continue
+						} else if room.isAlwaysWalkable(tiles[ct]) {
+							continue
+						} else if isTileCollision(tiles[ct]) {
+							// stop the bonk if we hit a wall or something:
+							break
+						}
+						canBonk = false
+						break
+					}
+					if canBonk && hasPit {
+						fmt.Printf("$%03X: pit bonk skip %s at $%04X off %02X\n", uint16(t.Supertile), d, uint16(c), v)
+						lifo = append(lifo, SE{c: ct, d: d, s: se.s})
+					}
+				}
+			}
+			if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
+				canTraverse = true
+			}
 		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
 			canTraverse = true
 		}
