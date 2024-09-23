@@ -987,7 +987,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			if !roomsWithPitDamage[st] {
 				// exit via pit:
 				neighborSt := room.WarpExitTo
-				ct := c | room.WarpExitLayer
+				ct := c&0x0FFF | room.WarpExitLayer
 				fmt.Printf("$%03X: pit $%04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
 				q.SubmitJob(
 					&ReachTask{
@@ -1008,6 +1008,34 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			if ct, _, ok := c.MoveBy(traverseDir, 2); ok && (tiles[ct] == 0xB6 || tiles[ct] == 0xBC) {
 				// start somaria from across a pit:
 				lifo = append(lifo, SE{c: ct, d: traverseDir, s: 2})
+			}
+			// check for bonkable block in the opposite direction to allow reverse-bonk-over-pit:
+			if cb, _, ok := c.MoveBy(traverseDir.Opposite(), 3); ok && isTileCollision(tiles[cb]) {
+				// ideally bonk against 0x27 tile
+				// can we cross the pit?
+				if ct, _, ok := c.MoveBy(traverseDir, 6); ok && room.isAlwaysWalkable(tiles[ct]) {
+					// prove all tiles in between are pit:
+					allPits := true
+					for i := 0; i < 6; i++ {
+						if ct, _, ok = c.MoveBy(traverseDir, i); !ok {
+							allPits = false
+							break
+						}
+						if tiles[ct] == 0x20 {
+							continue
+						} else if isTileCollision(tiles[ct]) {
+							continue
+						} else if room.isAlwaysWalkable(tiles[ct]) {
+							continue
+						}
+						allPits = false
+						break
+					}
+					if allPits {
+						fmt.Printf("$%03X: pit bonk skip at $%04X\n", uint16(t.Supertile), uint16(c))
+						lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
+					}
+				}
 			}
 		} else if v&0xF0 == 0x80 {
 			// shutter doors and entrance doors
