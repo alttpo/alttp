@@ -980,10 +980,31 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// traverseDir = DirWest
 				traverseBy = 5
 			}
-		} else if v == 0x20 {
-			// pit:
+		} else if v == 0x20 || v == 0x62 {
+			// pit or bombable floor:
 			room.Reachable[c] = v
 			room.HasReachablePit = true
+			if !roomsWithPitDamage[st] {
+				// exit via pit:
+				neighborSt := room.WarpExitTo
+				ct := c | room.WarpExitLayer
+				fmt.Printf("$%03X: pit $%04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
+				q.SubmitJob(
+					&ReachTask{
+						InitialEmulator: room.e,
+						EntranceID:      t.EntranceID,
+						Rooms:           t.Rooms,
+						RoomsLock:       t.RoomsLock,
+						Supertile:       neighborSt,
+						SE: SE{
+							c: c,
+							d: traverseDir,
+							s: se.s,
+						},
+					},
+					ReachTaskInterRoom,
+				)
+			}
 			if ct, _, ok := c.MoveBy(traverseDir, 2); ok && (tiles[ct] == 0xB6 || tiles[ct] == 0xBC) {
 				// start somaria from across a pit:
 				lifo = append(lifo, SE{c: ct, d: traverseDir, s: 2})
