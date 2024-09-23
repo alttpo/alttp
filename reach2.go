@@ -451,6 +451,37 @@ func tileAllowableDirFlags(v uint8) uint8 {
 		return 0b0000_1100
 	}
 
+	// somaria:
+	if v == 0xB0 {
+		return 0b0000_1100
+	} else if v == 0xB1 {
+		return 0b0000_0011
+	} else if v == 0xB2 {
+		return 0b0000_1010
+	} else if v == 0xB3 {
+		return 0b0000_1001
+	} else if v == 0xB4 {
+		return 0b0000_0110
+	} else if v == 0xB5 {
+		return 0b0000_0101
+	} else if v == 0xB6 {
+		return 0b0000_1111
+	} else if v == 0xB7 {
+		return 0b0000_1110
+	} else if v == 0xB8 {
+		return 0b0000_1101
+	} else if v == 0xB9 {
+		return 0b0000_1011
+	} else if v == 0xBA {
+		return 0b0000_0111
+	} else if v == 0xBB {
+		return 0b0000_1111
+	} else if v == 0xBC {
+		return 0b0000_1111
+	} else if v == 0xBD {
+		return 0b0000_1111
+	}
+
 	// collision prevents traversal:
 	if isTileCollision(v) {
 		return 0
@@ -811,6 +842,31 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				ReachTaskInterRoom,
 			)
 			canTraverse = true
+		} else if v == 0xB6 {
+			// end somaria (parallel):
+			canTraverse = true
+			canTurn = true
+			if ct, _, ok := c.MoveBy(traverseDir, 3); ok && !isTileCollision(tiles[ct]) {
+				lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
+			}
+		} else if v == 0xBC {
+			// end somaria (perpendicular):
+			canTraverse = true
+			canTurn = true
+			if ct, _, ok := c.MoveBy(traverseDir.RotateCW(), 3); ok && !isTileCollision(tiles[ct]) {
+				lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
+			}
+			if ct, _, ok := c.MoveBy(traverseDir.RotateCCW(), 3); ok && !isTileCollision(tiles[ct]) {
+				lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
+			}
+		} else if v == 0xBD {
+			// somaria cross-over:
+			canTraverse = true
+			canTurn = false
+			delete(room.TilesVisited, c)
+		} else if v >= 0xB0 && v <= 0xBD {
+			canTraverse = true
+			canTurn = true
 		} else if v == 0x28 {
 			// 28 - North ledge
 			canTraverse = true
@@ -839,6 +895,10 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			// pit:
 			room.Reachable[c] = v
 			room.HasReachablePit = true
+			if ct, _, ok := c.MoveBy(traverseDir, 2); ok && (tiles[ct] == 0xB6 || tiles[ct] == 0xBC) {
+				// start somaria from across a pit:
+				lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
+			}
 		} else if v&0xF0 == 0x80 {
 			// shutter doors and entrance doors
 			canTraverse = true
