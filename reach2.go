@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"hash/fnv"
 	"image"
 	"image/color"
 	"image/gif"
@@ -173,7 +174,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 		Doors:            []Door{},
 		Stairs:           []MapCoord{},
 		SwapLayers:       make(map[MapCoord]struct{}, 0x2000),
-		TilesVisited:     make(map[MapCoord]struct{}, 0x2000),
+		TilesVisitedHash: make(map[uint64]map[MapCoord]struct{}),
 		Tiles:            [8192]byte{},
 		Reachable:        [8192]byte{},
 		Hookshot:         map[MapCoord]byte{},
@@ -379,25 +380,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 		}
 	}
 
-	// this code is redundant to the tiles found within doorways, i hope...
-	// // find layer-swap tiles in doorways:
-	// swapCount := read16(wram, 0x044E)
-	// room.SwapLayers = make(map[MapCoord]empty, swapCount*4)
-	// for i := uint16(0); i < swapCount; i += 2 {
-	// 	c := MapCoord(read16(wram, uint32(0x06C0+i)))
-
-	// 	fmt.Printf("$%03X: swap %s\n", uint16(t.Supertile), c)
-	// 	// mark the 2x2 tile as a layer-swap:
-	// 	room.SwapLayers[c+0x00] = empty{}
-	// 	room.SwapLayers[c+0x01] = empty{}
-	// 	room.SwapLayers[c+0x40] = empty{}
-	// 	room.SwapLayers[c+0x41] = empty{}
-	// 	// have to put it on both layers? ew
-	// 	room.SwapLayers[c|0x1000+0x00] = empty{}
-	// 	room.SwapLayers[c|0x1000+0x01] = empty{}
-	// 	room.SwapLayers[c|0x1000+0x40] = empty{}
-	// 	room.SwapLayers[c|0x1000+0x41] = empty{}
-	// }
+	// persist the current TilesVisited map in its hash(tiles) slot:
+	room.SwapTilesVisitedMap()
 
 	os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
 	os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
@@ -554,7 +538,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 	st := t.Supertile
 
-	wram := room.WRAM
+	wram := room.WRAM[:]
 	tiles := wram[0x12000:0x14000]
 
 	// push starting state:
@@ -1035,8 +1019,36 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			// doorways:
 			canTraverse = true
 			canTurn = false
-		} else if v == 0x27 || v&0xF0 == 0x70 {
-			// can we bonk cross a pit from here?
+		} else if v&0xF0 == 0x70 {
+			// manipulables:
+			j := v & 0x0F
+			manipProps := read16(wram, 0x0500+uint32(j)<<1)
+			if manipProps == 0x0000 {
+				// push block:
+				write8(wram, 0x0641, 0x01)
+				room.PlaceLinkAt(c)
+				room.ProcessRoomTags()
+				room.SwapTilesVisitedMap()
+			}
+			canTraverse = true
+			canTurn = true
+		} else if v == 0x3A {
+			// 3A - inactive star tile
+			canTraverse = true
+		} else if v == 0x3B {
+			// 3B - active star tile
+			canTraverse = true
+			canTurn = true
+			fmt.Printf("$%03X: star at $%04X\n", uint16(t.Supertile), uint16(c))
+			room.PlaceLinkAt(c)
+			room.ProcessRoomTags()
+			room.SwapTilesVisitedMap()
+		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
+			canTraverse = true
+		}
+
+		// can we bonk cross a pit from this bonkable tile?
+		if v == 0x27 || v&0xF0 == 0x70 {
 			for d := DirNorth; d < DirNone; d++ {
 				// need a place to bonk from:
 				canBonk := true
@@ -1082,11 +1094,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					}
 				}
 			}
-			if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
-				canTraverse = true
-			}
-		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
-			canTraverse = true
 		}
 
 		if !canTraverse {
@@ -1176,4 +1183,65 @@ func (room *RoomState) AttemptTraversal(c MapCoord, d Direction, by int) (nc Map
 
 	nc, nd, ok = c.MoveBy(d, by)
 	return
+}
+
+func (room *RoomState) PlaceLinkAt(c MapCoord) {
+	// set absolute x,y coordinates to the tile:
+	x, y := c.ToAbsCoord(room.Supertile)
+	write16(room.WRAM[:], 0x20, y)
+	write16(room.WRAM[:], 0x22, x)
+	write16(room.WRAM[:], 0xEE, (uint16(c)&0x1000)>>10)
+}
+
+func (r *RoomState) ProcessRoomTags() bool {
+	e := r.e
+	if e.WRAM != &r.WRAM {
+		panic("NOPE")
+	}
+	wram := (r.WRAM)[:]
+
+	// if no tags present, don't check them:
+	oldAE, oldAF := read8(wram, 0xAE), read8(wram, 0xAF)
+	if oldAE == 0 && oldAF == 0 {
+		fmt.Printf("$%03X: tags: no tags to activate\n", uint16(r.Supertile))
+		return false
+	}
+
+	old04BC := read8(wram, 0x04BC)
+
+	if err := e.ExecAt(b00HandleRoomTagsPC, 0); err != nil {
+		panic(err)
+	}
+
+	// if $AE or $AF (room tags) are modified, then the tag was activated:
+	newAE, newAF := read8(wram, 0xAE), read8(wram, 0xAF)
+	if newAE != oldAE || newAF != oldAF {
+		// fmt.Printf("$%03X: tags: AE or AF modified\n", uint16(r.Supertile))
+		return true
+	}
+
+	new04BC := read8(wram, 0x04BC)
+	if new04BC != old04BC {
+		// fmt.Printf("$%03X: tags: 04BC modified\n", uint16(r.Supertile))
+		return true
+	}
+
+	// fmt.Printf("$%03X: tags: no change\n", uint16(r.Supertile))
+	return false
+}
+
+func (room *RoomState) SwapTilesVisitedMap() {
+	h := fnv.New64()
+	h.Write(room.WRAM[0x12000:0x14000])
+	tilesHash := h.Sum64()
+
+	fmt.Printf("$%03X: swap hash=%08X\n", uint16(room.Supertile), tilesHash)
+	os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(room.Supertile), tilesHash), room.WRAM[0x12000:0x14000], 0644)
+	if m, ok := room.TilesVisitedHash[tilesHash]; ok {
+		room.TilesVisited = m
+		return
+	}
+
+	room.TilesVisited = make(map[MapCoord]struct{}, 0x2000)
+	room.TilesVisitedHash[tilesHash] = room.TilesVisited
 }
