@@ -63,8 +63,8 @@ func ReachTaskInterRoom(q Q, t T) {
 		room = createRoom(t, e)
 		t.Rooms[uint16(t.Supertile)] = room
 	}
-	copy((*room.e.WRAM)[:], room.WRAM[:])
-	copy((*room.e.VRAM)[:], room.VRAMTileSet[:])
+	// copy((*room.e.WRAM)[:], room.WRAM[:])
+	// copy((*room.e.VRAM)[:], room.VRAMTileSet[:])
 	t.RoomsLock.Unlock()
 
 	reachTaskFloodfill(q, t, room)
@@ -191,7 +191,14 @@ func createRoom(t T, e *System) (room *RoomState) {
 	// do first-time room processing work:
 	// fmt.Printf("$%03X: room init\n", uint16(t.Supertile))
 
-	wram := (*e.WRAM)[:]
+	// copy emulator WRAM into room:
+	copy(room.WRAM[:], (*e.WRAM)[:])
+	copy(room.VRAMTileSet[:], (*e.VRAM)[0x4000:0x8000])
+
+	// point the emulator WRAM at the RoomState's WRAM:
+	e.WRAM = &room.WRAM
+
+	wram := (room.WRAM)[:]
 	tiles := wram[0x12000:0x14000]
 
 	for i := range room.Reachable {
@@ -433,9 +440,6 @@ func createRoom(t T, e *System) (room *RoomState) {
 		room.Rendered = g
 		room.RenderedNRGBA = g
 	}
-
-	copy(room.WRAM[:], (*e.WRAM)[:])
-	copy(room.VRAMTileSet[:], (*e.VRAM)[:])
 
 	return
 }
