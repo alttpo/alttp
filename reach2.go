@@ -480,6 +480,8 @@ func tileAllowableDirFlags(v uint8) uint8 {
 		return 0b0000_1111
 	} else if v == 0xBD {
 		return 0b0000_1111
+	} else if v == 0xBE {
+		return 0b0000_1111
 	}
 
 	// collision prevents traversal:
@@ -573,6 +575,105 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 		c := se.c
 		v := tiles[c]
+
+		if se.s == 2 {
+			// somaria:
+			if v == 0xB6 {
+				// end somaria (parallel):
+				canTurn = true
+				if ct, d, ok := c.MoveBy(traverseDir, 3); ok && !isTileCollision(tiles[ct]) {
+					lifo = append(lifo, SE{c: ct, d: d, s: 0})
+				}
+			} else if v == 0xBC {
+				// end somaria (perpendicular):
+				canTurn = true
+				if ct, d, ok := c.MoveBy(traverseDir.RotateCW(), 3); ok && !isTileCollision(tiles[ct]) {
+					lifo = append(lifo, SE{c: ct, d: d, s: 0})
+				}
+				if ct, d, ok := c.MoveBy(traverseDir.RotateCCW(), 3); ok && !isTileCollision(tiles[ct]) {
+					lifo = append(lifo, SE{c: ct, d: d, s: 0})
+				}
+			} else if v == 0xBD {
+				// somaria cross-over:
+				canTurn = false
+				delete(room.TilesVisited, c)
+			} else if v >= 0xB0 && v <= 0xBD {
+				canTurn = true
+			} else if v == 0xBE {
+				// pipe exit:
+				canTurn = false
+				se.s = 0
+			}
+
+			room.Reachable[c] = v
+			if canTurn {
+				// turn from here:
+				if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCW(), traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: se.s})
+				}
+				if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCCW(), traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: se.s})
+				}
+			}
+			// traverse in the primary direction:
+			if c, d, ok := room.AttemptTraversal(c, traverseDir, traverseBy); ok {
+				lifo = append(lifo, SE{c: c, d: d, s: se.s})
+			}
+			continue
+		} else if se.s == 3 {
+			// pipes:
+			allowDirFlags := byte(1 << traverseDir)
+			if v == 0xBE {
+				// pipe exit:
+				se.s = 0
+			} else if v == 0xB2 {
+				// north/east turn:
+				if traverseDir == DirNorth {
+					traverseDir = DirEast
+				} else if traverseDir == DirWest {
+					traverseDir = DirSouth
+				}
+				allowDirFlags = 1 << traverseDir
+			} else if v == 0xB3 {
+				// south/east turn:
+				if traverseDir == DirSouth {
+					traverseDir = DirEast
+				} else if traverseDir == DirWest {
+					traverseDir = DirNorth
+				}
+				allowDirFlags = 1 << traverseDir
+			} else if v == 0xB4 {
+				// north/west turn:
+				if traverseDir == DirNorth {
+					traverseDir = DirWest
+				} else if traverseDir == DirEast {
+					traverseDir = DirSouth
+				}
+				allowDirFlags = 1 << traverseDir
+			} else if v == 0xB5 {
+				// east/north turn:
+				if traverseDir == DirEast {
+					traverseDir = DirNorth
+				} else if traverseDir == DirSouth {
+					traverseDir = DirWest
+				}
+				allowDirFlags = 1 << traverseDir
+			} else if v == 0xBD {
+				// pipe cross-over:
+				// allow cross-over to be revisited:
+				delete(room.TilesVisited, c)
+			} else {
+				// allow collision tiles to be revisited in case of cross-over:
+				delete(room.TilesVisited, c)
+			}
+
+			room.Reachable[c] = v
+			// traverse in the primary direction:
+			if c, d, ok := attemptTraversal(c, allowDirFlags, traverseDir, traverseBy); ok {
+				lifo = append(lifo, SE{c: c, d: d, s: se.s})
+			}
+			continue
+		}
 
 		if v >= 0x80 && v <= 0x8D {
 			// traveling through a doorway:
@@ -842,31 +943,11 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				ReachTaskInterRoom,
 			)
 			canTraverse = true
-		} else if v == 0xB6 {
-			// end somaria (parallel):
-			canTraverse = true
-			canTurn = true
-			if ct, _, ok := c.MoveBy(traverseDir, 3); ok && !isTileCollision(tiles[ct]) {
-				lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
-			}
-		} else if v == 0xBC {
-			// end somaria (perpendicular):
-			canTraverse = true
-			canTurn = true
-			if ct, _, ok := c.MoveBy(traverseDir.RotateCW(), 3); ok && !isTileCollision(tiles[ct]) {
-				lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
-			}
-			if ct, _, ok := c.MoveBy(traverseDir.RotateCCW(), 3); ok && !isTileCollision(tiles[ct]) {
-				lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
-			}
-		} else if v == 0xBD {
-			// somaria cross-over:
+		} else if v == 0xBE {
+			// pipe entry:
 			canTraverse = true
 			canTurn = false
-			delete(room.TilesVisited, c)
-		} else if v >= 0xB0 && v <= 0xBD {
-			canTraverse = true
-			canTurn = true
+			se.s = 3
 		} else if v == 0x28 {
 			// 28 - North ledge
 			canTraverse = true
@@ -897,7 +978,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			room.HasReachablePit = true
 			if ct, _, ok := c.MoveBy(traverseDir, 2); ok && (tiles[ct] == 0xB6 || tiles[ct] == 0xBC) {
 				// start somaria from across a pit:
-				lifo = append(lifo, SE{c: ct, d: traverseDir, s: se.s})
+				lifo = append(lifo, SE{c: ct, d: traverseDir, s: 2})
 			}
 		} else if v&0xF0 == 0x80 {
 			// shutter doors and entrance doors
@@ -961,9 +1042,28 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	}
 }
 
+func canTraverseDir(allowDirFlags byte, d Direction) bool {
+	return allowDirFlags&uint8(1<<d) != 0
+}
+
+func attemptTraversal(c MapCoord, allowDirFlags byte, d Direction, by int) (nc MapCoord, nd Direction, ok bool) {
+	if by == 0 {
+		nc, nd, ok = c, d, true
+		return
+	}
+
+	if !canTraverseDir(allowDirFlags, d) {
+		nc, nd, ok = c, d, false
+		return
+	}
+
+	nc, nd, ok = c.MoveBy(d, by)
+	return
+}
+
 func (room *RoomState) CanTraverseDir(c MapCoord, d Direction) bool {
 	f := room.AllowDirFlags[c]
-	return f&uint8(1<<d) != 0
+	return canTraverseDir(f, d)
 }
 
 func (room *RoomState) AttemptTraversal(c MapCoord, d Direction, by int) (nc MapCoord, nd Direction, ok bool) {
