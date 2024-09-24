@@ -1442,7 +1442,7 @@ func (room *RoomState) SwapTilesVisitedMap() {
 	room.TilesVisitedHash[tilesHash] = room.TilesVisited
 
 	// render the new room state iff it's not been seen yet:
-	{
+	if false {
 		g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
 		room.renderToNonPaletted(g)
 		exportPNG(fmt.Sprintf("r%03X.%08X.png", uint16(room.Supertile), tilesHash), g)
