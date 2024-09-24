@@ -13,10 +13,24 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+type reachState int
+
+const (
+	reachStateWalk = reachState(iota)
+	reachStateDoorway
+	reachStateSomaria
+	reachStatePipe
+	reachStateStarTiles
+	reachStatePushBlock
+	reachStateKillRoom
+	reachStateSwim
+	reachStatePickUpBlock
+)
+
 type SE struct {
 	c    MapCoord
 	d    Direction
-	s    int
+	s    reachState
 	wram *WRAMArray
 }
 
@@ -78,7 +92,9 @@ func ReachTaskInterRoom(q Q, t T) {
 
 	reachTaskFloodfill(q, t, room)
 
-	room.RenderToNonPaletted()
+	if room.Rendered == nil {
+		room.RenderToNonPaletted()
+	}
 }
 
 func ReachTaskFromEntranceWorker(q Q, t T) {
@@ -121,7 +137,7 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 
 	t.SE.c = linkC
 	t.SE.d = linkD
-	t.SE.s = 0
+	t.SE.s = reachStateWalk
 
 	room := getOrCreateRoom(t, e)
 
@@ -543,7 +559,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	startStates = append(startStates, SE{
 		c:    t.SE.c,
 		d:    t.SE.d,
-		s:    6,
+		s:    reachStateKillRoom,
 		wram: nil,
 	})
 
@@ -558,16 +574,16 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 		fmt.Printf("$%03X: start=%04X dir=%5s state=%d\n", uint16(t.Supertile), uint16(startState.c), startState.d, startState.s)
 
-		if startState.s == 4 || startState.s == 5 || startState.s == 6 {
+		if startState.s == reachStateStarTiles || startState.s == reachStatePushBlock || startState.s == reachStateKillRoom {
 			// process tags:
 			// restore WRAM before processing tags:
 			if startState.wram != nil {
 				copy(wram[:], (*startState.wram)[:])
 			}
-			if startState.s == 5 {
+			if startState.s == reachStatePushBlock {
 				// manipulable push block always sets this when pushed:
 				write8(wram, 0x0641, 0x01)
-			} else if startState.s == 6 {
+			} else if startState.s == reachStateKillRoom {
 				// kill all enemies:
 				killedOne := false
 				for j := uint32(0); j < 16; j++ {
@@ -602,7 +618,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			// }
 			// fmt.Printf("$%03X: tags: ran; new [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
 
-			startState.s = 0
+			startState.s = reachStateWalk
 		} else {
 			// start from the initial load state:
 			copy(room.WRAM[:], room.WRAMAfterLoaded[:])
@@ -633,22 +649,22 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			traverseBy := 1
 			// fmt.Printf("$%03X: [$%04X]=%02X\n", uint16(st), uint16(se.c), v)
 
-			if se.s == 2 {
+			if se.s == reachStateSomaria {
 				// somaria:
 				if v == 0xB6 {
 					// end somaria (parallel):
 					canTurn = true
 					if ct, d, ok := c.MoveBy(traverseDir, 3); ok && !isTileCollision(tiles[ct]) {
-						lifo = append(lifo, SE{c: ct, d: d, s: 0})
+						lifo = append(lifo, SE{c: ct, d: d, s: reachStateWalk})
 					}
 				} else if v == 0xBC {
 					// end somaria (perpendicular):
 					canTurn = true
 					if ct, d, ok := c.MoveBy(traverseDir.RotateCW(), 3); ok && !isTileCollision(tiles[ct]) {
-						lifo = append(lifo, SE{c: ct, d: d, s: 0})
+						lifo = append(lifo, SE{c: ct, d: d, s: reachStateWalk})
 					}
 					if ct, d, ok := c.MoveBy(traverseDir.RotateCCW(), 3); ok && !isTileCollision(tiles[ct]) {
-						lifo = append(lifo, SE{c: ct, d: d, s: 0})
+						lifo = append(lifo, SE{c: ct, d: d, s: reachStateWalk})
 					}
 				} else if v == 0xBD {
 					// somaria cross-over:
@@ -659,7 +675,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				} else if v == 0xBE {
 					// pipe exit:
 					canTurn = false
-					se.s = 0
+					se.s = reachStateWalk
 				}
 
 				room.Reachable[c] = v
@@ -677,12 +693,12 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					lifo = append(lifo, SE{c: c, d: d, s: se.s})
 				}
 				continue
-			} else if se.s == 3 {
+			} else if se.s == reachStatePipe {
 				// pipes:
 				allowDirFlags := byte(1 << traverseDir)
 				if v == 0xBE {
 					// pipe exit:
-					se.s = 0
+					se.s = reachStateWalk
 				} else if v == 0xB2 {
 					// north/east turn:
 					if traverseDir == DirNorth {
@@ -730,7 +746,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					lifo = append(lifo, SE{c: c, d: d, s: se.s})
 				}
 				continue
-			} else if se.s == 7 {
+			} else if se.s == reachStateSwim {
 				// swimming:
 				if v == 0x08 {
 					canTraverse = true
@@ -747,7 +763,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 						d = DirSouth
 					}
 					if ct, _, ok := ct.MoveBy(d, 1); ok {
-						lifo = append(lifo, SE{c: ct, d: d, s: 0})
+						lifo = append(lifo, SE{c: ct, d: d, s: reachStateWalk})
 					}
 					continue
 				}
@@ -794,14 +810,14 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					v = tiles[c]
 					if v&0xF0 == 0x90 || v&0xF8 == 0xA8 {
 						// only swap layers if we're traversing the doorway initially, there may be a layer swap on the opposite side:
-						if se.s == 0 {
+						if se.s == reachStateWalk {
 							layerSwap = 0x1000
-							se.s = 1
+							se.s = reachStateDoorway
 						}
 					} else if v != initialV {
 						// stop when we're out of the doorway tiles
 						fmt.Printf("$%03X: doorway stop $%04X %s\n", uint16(t.Supertile), uint16(c), se.d)
-						se.s = 0
+						se.s = reachStateWalk
 						break
 					}
 
@@ -831,7 +847,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					// if we did not hit the edge then just do the layer swap if applicable:
 					c ^= layerSwap
 					layerSwap = 0
-					se.s = 0
+					se.s = reachStateWalk
 				}
 			} else if v == 0x1D || v == 0x3D {
 				// north or south single-layer auto-stairs:
@@ -1012,7 +1028,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// pipe entry:
 				canTraverse = true
 				canTurn = false
-				se.s = 3
+				se.s = reachStatePipe
 			} else if v == 0x28 {
 				// 28 - North ledge
 				canTurn = false
@@ -1049,7 +1065,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// 08 - deep water
 				// room 76 has this on layer 1 in place of a normal stairwell into the pool
 				if ct, d, ok := c.MoveBy(traverseDir, 2); ok {
-					lifo = append(lifo, SE{c: ct, d: d, s: 0})
+					lifo = append(lifo, SE{c: ct, d: d, s: reachStateWalk})
 				}
 			} else if v == 0x1C && !c.IsLayer2() {
 				if tiles[c|0x1000] == 0x0C {
@@ -1079,7 +1095,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				}
 				if ct, _, ok := c.MoveBy(traverseDir, 2); ok && (tiles[ct] == 0xB6 || tiles[ct] == 0xBC) {
 					// start somaria from across a pit:
-					lifo = append(lifo, SE{c: ct, d: traverseDir, s: 2})
+					lifo = append(lifo, SE{c: ct, d: traverseDir, s: reachStateSomaria})
 				}
 			} else if v&0xF0 == 0x80 {
 				// shutter doors and entrance doors
@@ -1104,7 +1120,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 						// 	r.pushAllDirections(t, StateSwim)
 						// }
 						// start swimming:
-						lifo = append(lifo, SE{c: ct, d: traverseDir, s: 7})
+						lifo = append(lifo, SE{c: ct, d: traverseDir, s: reachStateSwim})
 					}
 				}
 
@@ -1199,7 +1215,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				wramCopy := new(WRAMArray)
 				copy((*wramCopy)[:], room.WRAM[:])
 				// process star tile switch after current floodfill exhausts itself with the current room state:
-				startStates = append(startStates, SE{c: c, d: traverseDir, s: 4, wram: wramCopy})
+				startStates = append(startStates, SE{c: c, d: traverseDir, s: reachStateStarTiles, wram: wramCopy})
 			} else if v2x2 == 0x4B4B4B4B {
 				// 4B - warp tile
 				neighborSt := room.WarpExitTo
@@ -1216,14 +1232,14 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			} else if v2x2&0xF0F0F0F0 == 0x70707070 {
 				// manipulable block:
 				j := v & 0x0F
-				manipProps := read16(wram, 0x0500+uint32(j)<<1)
-				if manipProps == 0x0000 {
+				mp := read16(wram, 0x0500+uint32(j)<<1)
+				if mp == 0x0000 {
 					// push block:
 					// make a WRAM copy to resume from:
 					wramCopy := new(WRAMArray)
 					copy((*wramCopy)[:], room.WRAM[:])
 					// process block manipulation after current floodfill exhausts itself with the current room state:
-					startStates = append(startStates, SE{c: c, d: traverseDir, s: 5, wram: wramCopy})
+					startStates = append(startStates, SE{c: c, d: traverseDir, s: reachStatePushBlock, wram: wramCopy})
 				}
 			}
 
