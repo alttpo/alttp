@@ -1202,7 +1202,7 @@ func (room *RoomState) PlaceLinkAt(c MapCoord) {
 	write16(wram, 0x00E8, uint16(int(y)-0x40))
 }
 
-func (r *RoomState) ProcessRoomTags() bool {
+func (r *RoomState) ProcessRoomTags() {
 	e := r.e
 	if e.WRAM != &r.WRAM {
 		panic("NOPE")
@@ -1213,10 +1213,10 @@ func (r *RoomState) ProcessRoomTags() bool {
 	oldAE, oldAF := read8(wram, 0xAE), read8(wram, 0xAF)
 	if oldAE == 0 && oldAF == 0 {
 		fmt.Printf("$%03X: tags: no tags to activate\n", uint16(r.Supertile))
-		return false
+		return
 	}
 
-	old04BC := read8(wram, 0x04BC)
+	// old04BC := read8(wram, 0x04BC)
 
 	// e.CPU.OnWDM = func(wdm byte) {
 	// 	// capture frame to GIF:
@@ -1233,21 +1233,7 @@ func (r *RoomState) ProcessRoomTags() bool {
 
 	// e.CPU.OnWDM = nil
 
-	// if $AE or $AF (room tags) are modified, then the tag was activated:
-	newAE, newAF := read8(wram, 0xAE), read8(wram, 0xAF)
-	if newAE != oldAE || newAF != oldAF {
-		// fmt.Printf("$%03X: tags: AE or AF modified\n", uint16(r.Supertile))
-		return true
-	}
-
-	new04BC := read8(wram, 0x04BC)
-	if new04BC != old04BC {
-		// fmt.Printf("$%03X: tags: 04BC modified\n", uint16(r.Supertile))
-		return true
-	}
-
-	// fmt.Printf("$%03X: tags: no change\n", uint16(r.Supertile))
-	return false
+	return
 }
 
 func (room *RoomState) RecalcAllowDirFlags() {
@@ -1336,4 +1322,12 @@ func (room *RoomState) renderToNonPaletted(g *image.NRGBA) {
 			4*8+2,
 		)
 	}
+
+	// tags:
+	drawShadowedString(
+		g,
+		image.White,
+		fixed.Point26_6{X: fixed.I(32), Y: fixed.I(16)},
+		fmt.Sprintf("%02X %02X", uint8(room.WRAM[0xAE]), uint8(room.WRAM[0xAF])),
+	)
 }
