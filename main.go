@@ -436,7 +436,7 @@ func main() {
 
 	// run jobs starting from entrances:
 	if true {
-		roomsMap := make(map[uint16]*RoomState)
+		roomsMap := make(map[uint16]*RoomState, 0x128)
 		roomsLock := sync.Mutex{}
 
 		var nWorkers int

@@ -15,13 +15,16 @@ import (
 )
 
 type SE struct {
-	c MapCoord
-	d Direction
-	s int
+	c    MapCoord
+	d    Direction
+	s    int
+	wram *WRAMArray
 }
 
 type ReachTask struct {
 	InitialEmulator *System
+	EntranceWRAM    *WRAMArray
+	EntranceVRAM    *VRAMArray
 
 	Rooms     map[uint16]*RoomState
 	RoomsLock *sync.Mutex
@@ -46,6 +49,14 @@ func ReachTaskInterRoom(q Q, t T) {
 		e := &System{}
 		if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
 			panic(err)
+		}
+
+		// restore previous WRAM+VRAM pair:
+		if t.EntranceWRAM != nil {
+			copy((*e.WRAM)[:], (*t.EntranceWRAM)[:])
+		}
+		if t.EntranceVRAM != nil {
+			copy((*e.VRAM)[:], (*t.EntranceVRAM)[:])
 		}
 
 		st := t.Supertile
@@ -88,6 +99,11 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 	}
 
 	wram := (e.WRAM)[:]
+
+	t.EntranceWRAM = new(WRAMArray)
+	copy((*t.EntranceWRAM)[:], (*e.WRAM)[:])
+	t.EntranceVRAM = new(VRAMArray)
+	copy((*t.EntranceVRAM)[:], (*e.VRAM)[:])
 
 	// read dungeon ID:
 	// dungeonID := read8(wram, 0x040C)
@@ -541,66 +557,598 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	wram := room.WRAM[:]
 	tiles := wram[0x12000:0x14000]
 
+	pushJob := func(neighborSt Supertile, se SE) {
+		q.SubmitJob(
+			&ReachTask{
+				InitialEmulator: t.InitialEmulator,
+				EntranceWRAM:    t.EntranceWRAM,
+				EntranceVRAM:    t.EntranceVRAM,
+				EntranceID:      t.EntranceID,
+				Rooms:           t.Rooms,
+				RoomsLock:       t.RoomsLock,
+				Supertile:       neighborSt,
+				SE:              se,
+			},
+			ReachTaskInterRoom,
+		)
+	}
+
 	// push starting state:
+	startStates := make([]SE, 0, 1024)
+	startStates = append(startStates, t.SE)
+
 	lifo := make([]SE, 0, 1024)
-	lifo = append(lifo, t.SE)
 
-	fmt.Printf("$%03X: start=%04X dir=%s\n", uint16(t.Supertile), uint16(t.SE.c), t.SE.d)
+	for len(startStates) > 0 {
+		startState := startStates[len(startStates)-1]
+		startStates = startStates[:len(startStates)-1]
+		lifo = append(lifo, startState)
 
-	// iteratively recurse over processing stack:
-	for len(lifo) > 0 {
-		se := lifo[len(lifo)-1]
-		lifo = lifo[0 : len(lifo)-1]
+		fmt.Printf("$%03X: start=%04X dir=%5s state=%d\n", uint16(t.Supertile), uint16(startState.c), startState.d, startState.s)
 
-		if _, ok := room.TilesVisited[se.c]; ok {
-			continue
-		}
-		room.TilesVisited[se.c] = empty{}
+		// iteratively recurse over processing stack:
+		for len(lifo) > 0 {
+			se := lifo[len(lifo)-1]
+			lifo = lifo[0 : len(lifo)-1]
 
-		layerSwap := MapCoord(0)
+			c := se.c
+			v := tiles[c]
 
-		// default traversal state:
-		canTraverse := false
-		canTurn := true
-		traverseDir := se.d
-		traverseBy := 1
-		// fmt.Printf("$%03X: [$%04X]=%02X\n", uint16(st), uint16(se.c), v)
-
-		c := se.c
-		v := tiles[c]
-
-		if se.s == 2 {
-			// somaria:
-			if v == 0xB6 {
-				// end somaria (parallel):
-				canTurn = true
-				if ct, d, ok := c.MoveBy(traverseDir, 3); ok && !isTileCollision(tiles[ct]) {
-					lifo = append(lifo, SE{c: ct, d: d, s: 0})
+			if se.s == 4 {
+				// process tags:
+				// fmt.Printf("$%03X: tags: run; old v=%02X\n", uint16(t.Supertile), v)
+				// restore WRAM before processing tags:
+				if se.wram != nil {
+					copy(wram[:], (*se.wram)[:])
 				}
-			} else if v == 0xBC {
-				// end somaria (perpendicular):
-				canTurn = true
-				if ct, d, ok := c.MoveBy(traverseDir.RotateCW(), 3); ok && !isTileCollision(tiles[ct]) {
-					lifo = append(lifo, SE{c: ct, d: d, s: 0})
-				}
-				if ct, d, ok := c.MoveBy(traverseDir.RotateCCW(), 3); ok && !isTileCollision(tiles[ct]) {
-					lifo = append(lifo, SE{c: ct, d: d, s: 0})
-				}
-			} else if v == 0xBD {
-				// somaria cross-over:
-				canTurn = false
-				delete(room.TilesVisited, c)
-			} else if v >= 0xB0 && v <= 0xBD {
-				canTurn = true
-			} else if v == 0xBE {
-				// pipe exit:
-				canTurn = false
+				os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
+				room.PlaceLinkAt(c)
+				room.ProcessRoomTags()
+				room.SwapTilesVisitedMap()
+				// fmt.Printf("$%03X: tags: ran; new v=%02X\n", uint16(t.Supertile), tiles[c])
 				se.s = 0
 			}
 
+			if _, ok := room.TilesVisited[se.c]; ok {
+				continue
+			}
+			room.TilesVisited[se.c] = empty{}
+
+			layerSwap := MapCoord(0)
+
+			// default traversal state:
+			canTraverse := false
+			canTurn := true
+			traverseDir := se.d
+			traverseBy := 1
+			// fmt.Printf("$%03X: [$%04X]=%02X\n", uint16(st), uint16(se.c), v)
+
+			if se.s == 2 {
+				// somaria:
+				if v == 0xB6 {
+					// end somaria (parallel):
+					canTurn = true
+					if ct, d, ok := c.MoveBy(traverseDir, 3); ok && !isTileCollision(tiles[ct]) {
+						lifo = append(lifo, SE{c: ct, d: d, s: 0})
+					}
+				} else if v == 0xBC {
+					// end somaria (perpendicular):
+					canTurn = true
+					if ct, d, ok := c.MoveBy(traverseDir.RotateCW(), 3); ok && !isTileCollision(tiles[ct]) {
+						lifo = append(lifo, SE{c: ct, d: d, s: 0})
+					}
+					if ct, d, ok := c.MoveBy(traverseDir.RotateCCW(), 3); ok && !isTileCollision(tiles[ct]) {
+						lifo = append(lifo, SE{c: ct, d: d, s: 0})
+					}
+				} else if v == 0xBD {
+					// somaria cross-over:
+					canTurn = false
+					delete(room.TilesVisited, c)
+				} else if v >= 0xB0 && v <= 0xBD {
+					canTurn = true
+				} else if v == 0xBE {
+					// pipe exit:
+					canTurn = false
+					se.s = 0
+				}
+
+				room.Reachable[c] = v
+				if canTurn {
+					// turn from here:
+					if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCW(), traverseBy); ok {
+						lifo = append(lifo, SE{c: c, d: d, s: se.s})
+					}
+					if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCCW(), traverseBy); ok {
+						lifo = append(lifo, SE{c: c, d: d, s: se.s})
+					}
+				}
+				// traverse in the primary direction:
+				if c, d, ok := room.AttemptTraversal(c, traverseDir, traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: se.s})
+				}
+				continue
+			} else if se.s == 3 {
+				// pipes:
+				allowDirFlags := byte(1 << traverseDir)
+				if v == 0xBE {
+					// pipe exit:
+					se.s = 0
+				} else if v == 0xB2 {
+					// north/east turn:
+					if traverseDir == DirNorth {
+						traverseDir = DirEast
+					} else if traverseDir == DirWest {
+						traverseDir = DirSouth
+					}
+					allowDirFlags = 1 << traverseDir
+				} else if v == 0xB3 {
+					// south/east turn:
+					if traverseDir == DirSouth {
+						traverseDir = DirEast
+					} else if traverseDir == DirWest {
+						traverseDir = DirNorth
+					}
+					allowDirFlags = 1 << traverseDir
+				} else if v == 0xB4 {
+					// north/west turn:
+					if traverseDir == DirNorth {
+						traverseDir = DirWest
+					} else if traverseDir == DirEast {
+						traverseDir = DirSouth
+					}
+					allowDirFlags = 1 << traverseDir
+				} else if v == 0xB5 {
+					// east/north turn:
+					if traverseDir == DirEast {
+						traverseDir = DirNorth
+					} else if traverseDir == DirSouth {
+						traverseDir = DirWest
+					}
+					allowDirFlags = 1 << traverseDir
+				} else if v == 0xBD {
+					// pipe cross-over:
+					// allow cross-over to be revisited:
+					delete(room.TilesVisited, c)
+				} else {
+					// allow collision tiles to be revisited in case of cross-over:
+					delete(room.TilesVisited, c)
+				}
+
+				room.Reachable[c] = v
+				// traverse in the primary direction:
+				if c, d, ok := attemptTraversal(c, allowDirFlags, traverseDir, traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: se.s})
+				}
+				continue
+			}
+
+			if v >= 0x80 && v <= 0x8D {
+				// traveling through a doorway:
+				// TODO: special case for 0x89 transport door
+				initialV := v
+				canTraverse = true
+				canTurn = false
+				// don't advance beyond the end of the doorway:
+				traverseBy = 0
+
+				fmt.Printf("$%03X: doorway $%04X %s\n", uint16(t.Supertile), uint16(c), se.d)
+
+				// try to find a layer-swap tile in the doorway:
+				ok := true
+				for i := 0; ok && i < 16; i++ {
+					v = tiles[c]
+					if v&0xF0 == 0x90 || v&0xF8 == 0xA8 {
+						// only swap layers if we're traversing the doorway initially, there may be a layer swap on the opposite side:
+						if se.s == 0 {
+							layerSwap = 0x1000
+							se.s = 1
+						}
+					} else if v != initialV {
+						// stop when we're out of the doorway tiles
+						fmt.Printf("$%03X: doorway stop $%04X %s\n", uint16(t.Supertile), uint16(c), se.d)
+						se.s = 0
+						break
+					}
+
+					room.Reachable[c] = v
+					room.TilesVisited[c] = empty{}
+
+					// or stop if we hit the edge:
+					c, _, ok = c.MoveBy(se.d, 1)
+				}
+
+				if ok, _, _, _ = c.IsEdge(); ok {
+					// hit the edge:
+					if initialV == 0x89 {
+						// east/west transport door needs a special exit supertile, not its neighbor
+						neighborSt := room.StairExitTo[traverseDir]
+						fmt.Printf("$%03X: edge $%04X %s teleport exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
+						pushJob(
+							neighborSt,
+							SE{
+								c: c.OppositeEdge() ^ layerSwap,
+								d: traverseDir,
+								s: se.s,
+							})
+						continue
+					}
+				} else {
+					// if we did not hit the edge then just do the layer swap if applicable:
+					c ^= layerSwap
+					layerSwap = 0
+					se.s = 0
+				}
+			} else if v == 0x1D || v == 0x3D {
+				// north or south single-layer auto-stairs:
+				initialV := v
+				ok := true
+				for i := 0; ok && i < 2; i++ {
+					v = tiles[c]
+					if v != initialV {
+						break
+					}
+					room.Reachable[c] = v
+					room.TilesVisited[c] = empty{}
+					c, _, ok = c.MoveBy(se.d, 1)
+				}
+				if ok {
+					canTraverse = true
+					canTurn = false
+				}
+			} else if v == 0x1E || v == 0x1F || v == 0x3E || v == 0x3F {
+				// north or south layer-toggle auto-stairs:
+				initialV := v
+				ok := true
+				for i := 0; ok && i < 2; i++ {
+					v = tiles[c]
+					if v != initialV {
+						break
+					}
+					room.Reachable[c] = v
+					room.TilesVisited[c] = empty{}
+					c, _, ok = c.MoveBy(se.d, 1)
+				}
+				if ok {
+					canTraverse = true
+					canTurn = false
+					c ^= 0x1000
+				}
+			} else if v == 0x5E || v == 0x5F || v&0xF8 == 0x30 || v&0xF0 == 0xF0 {
+				// doors may cover in front of stairs
+				room.Reachable[c] = v
+
+				// find the stair tile:
+				var stairExit byte
+				var stairKind byte
+				for i := 0; i < 4; i++ {
+					cs, _, _ := c.MoveBy(traverseDir, i)
+					v = tiles[cs]
+					room.Reachable[cs] = v
+					if v >= 0x30 && v <= 0x37 {
+						stairExit = v
+						if stairKind == 0 {
+							stairKind = v
+						}
+					} else if v >= 0x38 && v <= 0x39 {
+						stairKind = v
+					} else if v == 0x5E || v == 0x5F {
+						stairKind = v
+					} else if v&0xF0 == 0xF0 {
+						continue
+					} else {
+						break
+					}
+				}
+
+				if stairKind == 0 {
+					canTraverse = true
+					canTurn = false
+				} else {
+					// move south of the stair tile:
+					ct, _, _ := c.MoveBy(traverseDir.Opposite(), 1)
+
+					fmt.Printf(
+						"$%03X: debug stairs at %04X exit=%02X, kind=%02X\n",
+						uint16(t.Supertile),
+						uint16(c),
+						stairExit,
+						stairKind,
+					)
+
+					var neighborSt Supertile
+					if stairKind == 0x38 {
+						// north stairs:
+						neighborSt = room.StairExitTo[stairExit&3]
+						traverseDir = DirNorth
+
+						// set destination layer:
+						ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
+						ct += 0x0D40
+
+						// adjust destination based on layer swap:
+						if stairExit&0x04 == 0 {
+							// going up
+							if c&0x1000 != 0 {
+								ct -= 0xC0
+							}
+							if ct&0x1000 != 0 {
+								ct -= 0xC0
+							}
+						} else {
+							// going down
+							if c&0x1000 != 0 {
+								ct += 0xC0
+							}
+							if ct&0x1000 != 0 {
+								ct += 0xC0
+							}
+						}
+					} else if stairKind == 0x39 {
+						// south stairs:
+						neighborSt = room.StairExitTo[stairExit&3]
+						traverseDir = DirSouth
+
+						// set destination layer:
+						ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
+						ct -= 0x0D40
+
+						// adjust destination based on layer swap:
+						if stairExit&0x04 == 0 {
+							// going up
+							if c&0x1000 != 0 {
+								ct -= 0xC0
+							}
+							if ct&0x1000 != 0 {
+								ct -= 0xC0
+							}
+						} else {
+							// going down
+							if c&0x1000 != 0 {
+								ct += 0xC0
+							}
+							if ct&0x1000 != 0 {
+								ct += 0xC0
+							}
+						}
+					} else if stairKind == 0x5E || stairKind == 0x5F {
+						// inter-room stairs:
+						neighborSt = room.StairExitTo[stairExit&3]
+						traverseDir = DirSouth
+
+						// set destination layer:
+						ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
+
+						// adjust destination based on layer swap:
+						if stairExit&0x04 == 0 {
+							// going up
+							if c.IsLayer2() && !ct.IsLayer2() {
+								ct -= 0xC0
+							} else if !c.IsLayer2() && ct.IsLayer2() {
+								ct += 0xC0
+							}
+						} else {
+							// going down
+							if c.IsLayer2() && !ct.IsLayer2() {
+								ct -= 0xC0
+							} else if !c.IsLayer2() && ct.IsLayer2() {
+								ct += 0xC0
+							}
+						}
+					} else if stairKind >= 0x30 && stairKind <= 0x37 {
+						// straight inter-room stairs:
+						neighborSt = room.StairExitTo[stairExit&3]
+						ct, _, _ = c.MoveBy(traverseDir, 1)
+
+						// set destination layer:
+						ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
+					}
+
+					fmt.Printf("$%03X: stairs $%04X exit to $%03X at $%04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
+					pushJob(
+						neighborSt,
+						SE{
+							c: ct,
+							d: traverseDir,
+							s: se.s,
+						})
+					continue
+				}
+			} else if v == 0x4B {
+				// 4B - warp tile
+				neighborSt := room.WarpExitTo
+				ct := c | room.WarpExitLayer
+				fmt.Printf("$%03X: warp $%04X exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
+				pushJob(
+					neighborSt,
+					SE{
+						c: ct,
+						d: traverseDir,
+						s: se.s,
+					})
+				canTraverse = true
+			} else if v == 0xBE {
+				// pipe entry:
+				canTraverse = true
+				canTurn = false
+				se.s = 3
+			} else if v == 0x28 {
+				// 28 - North ledge
+				canTurn = false
+				if traverseDir == DirNorth || traverseDir == DirSouth {
+					canTraverse = true
+					// traverseDir = DirNorth
+					traverseBy = 5
+				}
+			} else if v == 0x29 {
+				// 29 - South ledge
+				canTurn = false
+				if traverseDir == DirNorth || traverseDir == DirSouth {
+					canTraverse = true
+					// traverseDir = DirSouth
+					traverseBy = 5
+				}
+			} else if v == 0x2A {
+				// 2A - East ledge
+				canTurn = false
+				if traverseDir == DirWest || traverseDir == DirEast {
+					canTraverse = true
+					// traverseDir = DirEast
+					traverseBy = 5
+				}
+			} else if v == 0x2B {
+				// 2B - West ledge
+				canTurn = false
+				if traverseDir == DirWest || traverseDir == DirEast {
+					canTraverse = true
+					// traverseDir = DirWest
+					traverseBy = 5
+				}
+			} else if v == 0x1C && !c.IsLayer2() {
+				if tiles[c|0x1000] == 0x0C {
+					canTraverse = true
+					canTurn = true
+				} else {
+					// transition from layer 1 to layer 2:
+					fmt.Printf("$%03X: fall $%04X\n", uint16(t.Supertile), uint16(c))
+					lifo = append(lifo, SE{c: c | 0x1000, d: traverseDir, s: se.s})
+				}
+			} else if v == 0x20 || v == 0x62 {
+				// pit or bombable floor:
+				room.Reachable[c] = v
+				room.HasReachablePit = true
+				if !roomsWithPitDamage[st] {
+					// exit via pit:
+					neighborSt := room.WarpExitTo
+					ct := c&0x0FFF | room.WarpExitLayer
+					fmt.Printf("$%03X: pit $%04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
+					pushJob(
+						neighborSt,
+						SE{
+							c: ct,
+							d: traverseDir,
+							s: se.s,
+						})
+				}
+				if ct, _, ok := c.MoveBy(traverseDir, 2); ok && (tiles[ct] == 0xB6 || tiles[ct] == 0xBC) {
+					// start somaria from across a pit:
+					lifo = append(lifo, SE{c: ct, d: traverseDir, s: 2})
+				}
+			} else if v&0xF0 == 0x80 {
+				// shutter doors and entrance doors
+				canTraverse = true
+				canTurn = false
+			} else if v&0xF0 == 0xF0 {
+				// doorways:
+				canTraverse = true
+				canTurn = false
+			} else if v&0xF0 == 0x70 {
+				// manipulables:
+				if false {
+					j := v & 0x0F
+					manipProps := read16(wram, 0x0500+uint32(j)<<1)
+					if manipProps == 0x0000 {
+						// push block:
+						write8(wram, 0x0641, 0x01)
+						room.PlaceLinkAt(c)
+						room.ProcessRoomTags()
+						room.SwapTilesVisitedMap()
+					}
+				}
+				canTraverse = true
+				canTurn = true
+			} else if v == 0x3A {
+				// 3A - inactive star tile
+				canTraverse = true
+			} else if v == 0x3B {
+				// 3B - active star tile
+				canTraverse = true
+				canTurn = true
+				fmt.Printf("$%03X: star at $%04X\n", uint16(t.Supertile), uint16(c))
+				// make a WRAM copy to resume from:
+				wramCopy := new(WRAMArray)
+				copy((*wramCopy)[:], room.WRAM[:])
+				startStates = append(startStates, SE{c: c, d: traverseDir, s: 4, wram: wramCopy})
+			} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
+				canTraverse = true
+			}
+
+			// can we bonk cross a pit from this bonkable tile?
+			if v == 0x27 || v&0xF0 == 0x70 {
+				for d := DirNorth; d < DirNone; d++ {
+					// need a place to bonk from:
+					canBonk := true
+					ct, _, ok := c.MoveBy(d, 1)
+					if !ok {
+						canBonk = false
+					}
+					if !room.isAlwaysWalkable(tiles[ct]) {
+						canBonk = false
+					}
+					ct, _, ok = c.MoveBy(d, 2)
+					if !ok {
+						canBonk = false
+					}
+					if !room.isAlwaysWalkable(tiles[ct]) {
+						canBonk = false
+					}
+
+					if canBonk {
+						// prove all tiles in between are pit:
+						hasPit := false
+						ct = c
+						for i := 1; i <= 9; i++ {
+							if ct, _, ok = ct.MoveBy(d, 1); !ok {
+								canBonk = false
+								break
+							}
+							if tiles[ct] == 0x20 {
+								hasPit = true
+								continue
+							} else if room.isAlwaysWalkable(tiles[ct]) {
+								continue
+							} else if isTileCollision(tiles[ct]) {
+								// stop the bonk if we hit a wall or something:
+								break
+							}
+							canBonk = false
+							break
+						}
+						if canBonk && hasPit {
+							fmt.Printf("$%03X: pit bonk skip %s at $%04X off %02X\n", uint16(t.Supertile), d, uint16(c), v)
+							lifo = append(lifo, SE{c: ct, d: d, s: se.s})
+						}
+					}
+				}
+			}
+
+			if !canTraverse {
+				continue
+			}
+
 			room.Reachable[c] = v
+
+			// transition to neighboring room at the edges:
+			if ok, edgeDir, _, _ := c.IsEdge(); ok {
+				if traverseDir == edgeDir && room.CanTraverseDir(c, traverseDir) {
+					if neighborSt, _, ok := st.MoveBy(traverseDir); ok {
+						fmt.Printf("$%03X: edge $%04X %s exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
+						pushJob(
+							neighborSt,
+							SE{
+								c: c.OppositeEdge() ^ layerSwap,
+								d: traverseDir,
+								s: se.s,
+							})
+						continue
+					}
+				}
+			}
+
 			if canTurn {
 				// turn from here:
+				if c, d, ok := room.AttemptTraversal(c, traverseDir.Opposite(), traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: se.s})
+				}
 				if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCW(), traverseBy); ok {
 					lifo = append(lifo, SE{c: c, d: d, s: se.s})
 				}
@@ -612,536 +1160,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			if c, d, ok := room.AttemptTraversal(c, traverseDir, traverseBy); ok {
 				lifo = append(lifo, SE{c: c, d: d, s: se.s})
 			}
-			continue
-		} else if se.s == 3 {
-			// pipes:
-			allowDirFlags := byte(1 << traverseDir)
-			if v == 0xBE {
-				// pipe exit:
-				se.s = 0
-			} else if v == 0xB2 {
-				// north/east turn:
-				if traverseDir == DirNorth {
-					traverseDir = DirEast
-				} else if traverseDir == DirWest {
-					traverseDir = DirSouth
-				}
-				allowDirFlags = 1 << traverseDir
-			} else if v == 0xB3 {
-				// south/east turn:
-				if traverseDir == DirSouth {
-					traverseDir = DirEast
-				} else if traverseDir == DirWest {
-					traverseDir = DirNorth
-				}
-				allowDirFlags = 1 << traverseDir
-			} else if v == 0xB4 {
-				// north/west turn:
-				if traverseDir == DirNorth {
-					traverseDir = DirWest
-				} else if traverseDir == DirEast {
-					traverseDir = DirSouth
-				}
-				allowDirFlags = 1 << traverseDir
-			} else if v == 0xB5 {
-				// east/north turn:
-				if traverseDir == DirEast {
-					traverseDir = DirNorth
-				} else if traverseDir == DirSouth {
-					traverseDir = DirWest
-				}
-				allowDirFlags = 1 << traverseDir
-			} else if v == 0xBD {
-				// pipe cross-over:
-				// allow cross-over to be revisited:
-				delete(room.TilesVisited, c)
-			} else {
-				// allow collision tiles to be revisited in case of cross-over:
-				delete(room.TilesVisited, c)
-			}
-
-			room.Reachable[c] = v
-			// traverse in the primary direction:
-			if c, d, ok := attemptTraversal(c, allowDirFlags, traverseDir, traverseBy); ok {
-				lifo = append(lifo, SE{c: c, d: d, s: se.s})
-			}
-			continue
-		}
-
-		if v >= 0x80 && v <= 0x8D {
-			// traveling through a doorway:
-			// TODO: special case for 0x89 transport door
-			initialV := v
-			canTraverse = true
-			canTurn = false
-			// don't advance beyond the end of the doorway:
-			traverseBy = 0
-
-			fmt.Printf("$%03X: doorway $%04X %s\n", uint16(t.Supertile), uint16(c), se.d)
-
-			// try to find a layer-swap tile in the doorway:
-			ok := true
-			for i := 0; ok && i < 16; i++ {
-				v = tiles[c]
-				if v&0xF0 == 0x90 || v&0xF8 == 0xA8 {
-					// only swap layers if we're traversing the doorway initially, there may be a layer swap on the opposite side:
-					if se.s == 0 {
-						layerSwap = 0x1000
-						se.s = 1
-					}
-				} else if v != initialV {
-					// stop when we're out of the doorway tiles
-					fmt.Printf("$%03X: doorway stop $%04X %s\n", uint16(t.Supertile), uint16(c), se.d)
-					se.s = 0
-					break
-				}
-
-				room.Reachable[c] = v
-				room.TilesVisited[c] = empty{}
-
-				// or stop if we hit the edge:
-				c, _, ok = c.MoveBy(se.d, 1)
-			}
-
-			if ok, _, _, _ = c.IsEdge(); ok {
-				// hit the edge:
-				if initialV == 0x89 {
-					// east/west transport door needs a special exit supertile, not its neighbor
-					neighborSt := room.StairExitTo[traverseDir]
-					fmt.Printf("$%03X: edge $%04X %s teleport exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
-					q.SubmitJob(
-						&ReachTask{
-							InitialEmulator: room.e,
-							EntranceID:      t.EntranceID,
-							Rooms:           t.Rooms,
-							RoomsLock:       t.RoomsLock,
-							Supertile:       neighborSt,
-							SE: SE{
-								c: c.OppositeEdge() ^ layerSwap,
-								d: traverseDir,
-								s: se.s,
-							},
-						},
-						ReachTaskInterRoom,
-					)
-					continue
-				}
-			} else {
-				// if we did not hit the edge then just do the layer swap if applicable:
-				c ^= layerSwap
-				layerSwap = 0
-				se.s = 0
-			}
-		} else if v == 0x1D || v == 0x3D {
-			// north or south single-layer auto-stairs:
-			initialV := v
-			ok := true
-			for i := 0; ok && i < 2; i++ {
-				v = tiles[c]
-				if v != initialV {
-					break
-				}
-				room.Reachable[c] = v
-				room.TilesVisited[c] = empty{}
-				c, _, ok = c.MoveBy(se.d, 1)
-			}
-			if ok {
-				canTraverse = true
-				canTurn = false
-			}
-		} else if v == 0x1E || v == 0x1F || v == 0x3E || v == 0x3F {
-			// north or south layer-toggle auto-stairs:
-			initialV := v
-			ok := true
-			for i := 0; ok && i < 2; i++ {
-				v = tiles[c]
-				if v != initialV {
-					break
-				}
-				room.Reachable[c] = v
-				room.TilesVisited[c] = empty{}
-				c, _, ok = c.MoveBy(se.d, 1)
-			}
-			if ok {
-				canTraverse = true
-				canTurn = false
-				c ^= 0x1000
-			}
-		} else if v == 0x5E || v == 0x5F || v&0xF8 == 0x30 || v&0xF0 == 0xF0 {
-			// doors may cover in front of stairs
-			room.Reachable[c] = v
-
-			// find the stair tile:
-			var stairExit byte
-			var stairKind byte
-			for i := 0; i < 4; i++ {
-				cs, _, _ := c.MoveBy(traverseDir, i)
-				v = tiles[cs]
-				room.Reachable[cs] = v
-				if v >= 0x30 && v <= 0x37 {
-					stairExit = v
-					if stairKind == 0 {
-						stairKind = v
-					}
-				} else if v >= 0x38 && v <= 0x39 {
-					stairKind = v
-				} else if v == 0x5E || v == 0x5F {
-					stairKind = v
-				} else if v&0xF0 == 0xF0 {
-					continue
-				} else {
-					break
-				}
-			}
-
-			if stairKind == 0 {
-				canTraverse = true
-				canTurn = false
-			} else {
-				// move south of the stair tile:
-				ct, _, _ := c.MoveBy(traverseDir.Opposite(), 1)
-
-				fmt.Printf(
-					"$%03X: debug stairs at %04X exit=%02X, kind=%02X\n",
-					uint16(t.Supertile),
-					uint16(c),
-					stairExit,
-					stairKind,
-				)
-
-				var neighborSt Supertile
-				if stairKind == 0x38 {
-					// north stairs:
-					neighborSt = room.StairExitTo[stairExit&3]
-					traverseDir = DirNorth
-
-					// set destination layer:
-					ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
-					ct += 0x0D40
-
-					// adjust destination based on layer swap:
-					if stairExit&0x04 == 0 {
-						// going up
-						if c&0x1000 != 0 {
-							ct -= 0xC0
-						}
-						if ct&0x1000 != 0 {
-							ct -= 0xC0
-						}
-					} else {
-						// going down
-						if c&0x1000 != 0 {
-							ct += 0xC0
-						}
-						if ct&0x1000 != 0 {
-							ct += 0xC0
-						}
-					}
-				} else if stairKind == 0x39 {
-					// south stairs:
-					neighborSt = room.StairExitTo[stairExit&3]
-					traverseDir = DirSouth
-
-					// set destination layer:
-					ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
-					ct -= 0x0D40
-
-					// adjust destination based on layer swap:
-					if stairExit&0x04 == 0 {
-						// going up
-						if c&0x1000 != 0 {
-							ct -= 0xC0
-						}
-						if ct&0x1000 != 0 {
-							ct -= 0xC0
-						}
-					} else {
-						// going down
-						if c&0x1000 != 0 {
-							ct += 0xC0
-						}
-						if ct&0x1000 != 0 {
-							ct += 0xC0
-						}
-					}
-				} else if stairKind == 0x5E || stairKind == 0x5F {
-					// inter-room stairs:
-					neighborSt = room.StairExitTo[stairExit&3]
-					traverseDir = DirSouth
-
-					// set destination layer:
-					ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
-
-					// adjust destination based on layer swap:
-					if stairExit&0x04 == 0 {
-						// going up
-						if c.IsLayer2() && !ct.IsLayer2() {
-							ct -= 0xC0
-						} else if !c.IsLayer2() && ct.IsLayer2() {
-							ct += 0xC0
-						}
-					} else {
-						// going down
-						if c.IsLayer2() && !ct.IsLayer2() {
-							ct -= 0xC0
-						} else if !c.IsLayer2() && ct.IsLayer2() {
-							ct += 0xC0
-						}
-					}
-				} else if stairKind >= 0x30 && stairKind <= 0x37 {
-					// straight inter-room stairs:
-					neighborSt = room.StairExitTo[stairExit&3]
-					ct, _, _ = c.MoveBy(traverseDir, 1)
-
-					// set destination layer:
-					ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
-				}
-
-				fmt.Printf("$%03X: stairs $%04X exit to $%03X at $%04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
-				q.SubmitJob(
-					&ReachTask{
-						InitialEmulator: room.e,
-						EntranceID:      t.EntranceID,
-						Rooms:           t.Rooms,
-						RoomsLock:       t.RoomsLock,
-						Supertile:       neighborSt,
-						SE: SE{
-							c: ct,
-							d: traverseDir,
-							s: se.s,
-						},
-					},
-					ReachTaskInterRoom,
-				)
-				continue
-			}
-		} else if v == 0x4B {
-			// 4B - warp tile
-			neighborSt := room.WarpExitTo
-			ct := c | room.WarpExitLayer
-			fmt.Printf("$%03X: warp $%04X exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
-			q.SubmitJob(
-				&ReachTask{
-					InitialEmulator: room.e,
-					EntranceID:      t.EntranceID,
-					Rooms:           t.Rooms,
-					RoomsLock:       t.RoomsLock,
-					Supertile:       neighborSt,
-					SE: SE{
-						c: ct,
-						d: traverseDir,
-						s: se.s,
-					},
-				},
-				ReachTaskInterRoom,
-			)
-			canTraverse = true
-		} else if v == 0xBE {
-			// pipe entry:
-			canTraverse = true
-			canTurn = false
-			se.s = 3
-		} else if v == 0x28 {
-			// 28 - North ledge
-			canTurn = false
-			if traverseDir == DirNorth || traverseDir == DirSouth {
-				canTraverse = true
-				// traverseDir = DirNorth
-				traverseBy = 5
-			}
-		} else if v == 0x29 {
-			// 29 - South ledge
-			canTurn = false
-			if traverseDir == DirNorth || traverseDir == DirSouth {
-				canTraverse = true
-				// traverseDir = DirSouth
-				traverseBy = 5
-			}
-		} else if v == 0x2A {
-			// 2A - East ledge
-			canTurn = false
-			if traverseDir == DirWest || traverseDir == DirEast {
-				canTraverse = true
-				// traverseDir = DirEast
-				traverseBy = 5
-			}
-		} else if v == 0x2B {
-			// 2B - West ledge
-			canTurn = false
-			if traverseDir == DirWest || traverseDir == DirEast {
-				canTraverse = true
-				// traverseDir = DirWest
-				traverseBy = 5
-			}
-		} else if v == 0x1C && !c.IsLayer2() {
-			if tiles[c|0x1000] == 0x0C {
-				canTraverse = true
-				canTurn = true
-			} else {
-				// transition from layer 1 to layer 2:
-				fmt.Printf("$%03X: fall $%04X\n", uint16(t.Supertile), uint16(c))
-				lifo = append(lifo, SE{c: c | 0x1000, d: traverseDir, s: se.s})
-			}
-		} else if v == 0x20 || v == 0x62 {
-			// pit or bombable floor:
-			room.Reachable[c] = v
-			room.HasReachablePit = true
-			if !roomsWithPitDamage[st] {
-				// exit via pit:
-				neighborSt := room.WarpExitTo
-				ct := c&0x0FFF | room.WarpExitLayer
-				fmt.Printf("$%03X: pit $%04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
-				q.SubmitJob(
-					&ReachTask{
-						InitialEmulator: room.e,
-						EntranceID:      t.EntranceID,
-						Rooms:           t.Rooms,
-						RoomsLock:       t.RoomsLock,
-						Supertile:       neighborSt,
-						SE: SE{
-							c: ct,
-							d: traverseDir,
-							s: se.s,
-						},
-					},
-					ReachTaskInterRoom,
-				)
-			}
-			if ct, _, ok := c.MoveBy(traverseDir, 2); ok && (tiles[ct] == 0xB6 || tiles[ct] == 0xBC) {
-				// start somaria from across a pit:
-				lifo = append(lifo, SE{c: ct, d: traverseDir, s: 2})
-			}
-		} else if v&0xF0 == 0x80 {
-			// shutter doors and entrance doors
-			canTraverse = true
-			canTurn = false
-		} else if v&0xF0 == 0xF0 {
-			// doorways:
-			canTraverse = true
-			canTurn = false
-		} else if v&0xF0 == 0x70 {
-			// manipulables:
-			j := v & 0x0F
-			manipProps := read16(wram, 0x0500+uint32(j)<<1)
-			if manipProps == 0x0000 {
-				// push block:
-				write8(wram, 0x0641, 0x01)
-				room.PlaceLinkAt(c)
-				room.ProcessRoomTags()
-				room.SwapTilesVisitedMap()
-			}
-			canTraverse = true
-			canTurn = true
-		} else if v == 0x3A {
-			// 3A - inactive star tile
-			canTraverse = true
-		} else if v == 0x3B {
-			// 3B - active star tile
-			canTraverse = true
-			canTurn = true
-			fmt.Printf("$%03X: star at $%04X\n", uint16(t.Supertile), uint16(c))
-			room.PlaceLinkAt(c)
-			room.ProcessRoomTags()
-			room.SwapTilesVisitedMap()
-		} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
-			canTraverse = true
-		}
-
-		// can we bonk cross a pit from this bonkable tile?
-		if v == 0x27 || v&0xF0 == 0x70 {
-			for d := DirNorth; d < DirNone; d++ {
-				// need a place to bonk from:
-				canBonk := true
-				ct, _, ok := c.MoveBy(d, 1)
-				if !ok {
-					canBonk = false
-				}
-				if !room.isAlwaysWalkable(tiles[ct]) {
-					canBonk = false
-				}
-				ct, _, ok = c.MoveBy(d, 2)
-				if !ok {
-					canBonk = false
-				}
-				if !room.isAlwaysWalkable(tiles[ct]) {
-					canBonk = false
-				}
-
-				if canBonk {
-					// prove all tiles in between are pit:
-					hasPit := false
-					ct = c
-					for i := 1; i <= 9; i++ {
-						if ct, _, ok = ct.MoveBy(d, 1); !ok {
-							canBonk = false
-							break
-						}
-						if tiles[ct] == 0x20 {
-							hasPit = true
-							continue
-						} else if room.isAlwaysWalkable(tiles[ct]) {
-							continue
-						} else if isTileCollision(tiles[ct]) {
-							// stop the bonk if we hit a wall or something:
-							break
-						}
-						canBonk = false
-						break
-					}
-					if canBonk && hasPit {
-						fmt.Printf("$%03X: pit bonk skip %s at $%04X off %02X\n", uint16(t.Supertile), d, uint16(c), v)
-						lifo = append(lifo, SE{c: ct, d: d, s: se.s})
-					}
-				}
-			}
-		}
-
-		if !canTraverse {
-			continue
-		}
-
-		room.Reachable[c] = v
-
-		// transition to neighboring room at the edges:
-		if ok, edgeDir, _, _ := c.IsEdge(); ok {
-			if traverseDir == edgeDir && room.CanTraverseDir(c, traverseDir) {
-				if neighborSt, _, ok := st.MoveBy(traverseDir); ok {
-					fmt.Printf("$%03X: edge $%04X %s exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
-					q.SubmitJob(
-						&ReachTask{
-							InitialEmulator: room.e,
-							EntranceID:      t.EntranceID,
-							Rooms:           t.Rooms,
-							RoomsLock:       t.RoomsLock,
-							Supertile:       neighborSt,
-							SE: SE{
-								c: c.OppositeEdge() ^ layerSwap,
-								d: traverseDir,
-								s: se.s,
-							},
-						},
-						ReachTaskInterRoom,
-					)
-					continue
-				}
-			}
-		}
-
-		if canTurn {
-			// turn from here:
-			if c, d, ok := room.AttemptTraversal(c, traverseDir.Opposite(), traverseBy); ok {
-				lifo = append(lifo, SE{c: c, d: d, s: se.s})
-			}
-			if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCW(), traverseBy); ok {
-				lifo = append(lifo, SE{c: c, d: d, s: se.s})
-			}
-			if c, d, ok := room.AttemptTraversal(c, traverseDir.RotateCCW(), traverseBy); ok {
-				lifo = append(lifo, SE{c: c, d: d, s: se.s})
-			}
-		}
-		// traverse in the primary direction:
-		if c, d, ok := room.AttemptTraversal(c, traverseDir, traverseBy); ok {
-			lifo = append(lifo, SE{c: c, d: d, s: se.s})
 		}
 	}
 }
@@ -1186,11 +1204,17 @@ func (room *RoomState) AttemptTraversal(c MapCoord, d Direction, by int) (nc Map
 }
 
 func (room *RoomState) PlaceLinkAt(c MapCoord) {
+	wram := room.WRAM[:]
+
 	// set absolute x,y coordinates to the tile:
 	x, y := c.ToAbsCoord(room.Supertile)
-	write16(room.WRAM[:], 0x20, y)
-	write16(room.WRAM[:], 0x22, x)
-	write16(room.WRAM[:], 0xEE, (uint16(c)&0x1000)>>10)
+	write16(wram, 0x20, y)
+	write16(wram, 0x22, x)
+	write16(wram, 0xEE, (uint16(c)&0x1000)>>12)
+
+	// ensure link on screen:
+	write16(wram, 0x00E2, uint16(int(x)-0x40))
+	write16(wram, 0x00E8, uint16(int(y)-0x40))
 }
 
 func (r *RoomState) ProcessRoomTags() bool {
@@ -1209,9 +1233,18 @@ func (r *RoomState) ProcessRoomTags() bool {
 
 	old04BC := read8(wram, 0x04BC)
 
+	e.CPU.OnWDM = func(wdm byte) {
+		// capture frame to GIF:
+		if wdm == 0xFF {
+			// fmt.Println("WDM: frame")
+		}
+	}
+
 	if err := e.ExecAt(b00HandleRoomTagsPC, 0); err != nil {
 		panic(err)
 	}
+
+	e.CPU.OnWDM = nil
 
 	// if $AE or $AF (room tags) are modified, then the tag was activated:
 	newAE, newAF := read8(wram, 0xAE), read8(wram, 0xAF)
@@ -1230,13 +1263,19 @@ func (r *RoomState) ProcessRoomTags() bool {
 	return false
 }
 
-func (room *RoomState) SwapTilesVisitedMap() {
+func (room *RoomState) CalcTilesHash() (tilesHash uint64) {
 	h := fnv.New64()
 	h.Write(room.WRAM[0x12000:0x14000])
-	tilesHash := h.Sum64()
+	tilesHash = h.Sum64()
+
+	return
+}
+
+func (room *RoomState) SwapTilesVisitedMap() {
+	tilesHash := room.CalcTilesHash()
 
 	fmt.Printf("$%03X: swap hash=%08X\n", uint16(room.Supertile), tilesHash)
-	os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(room.Supertile), tilesHash), room.WRAM[0x12000:0x14000], 0644)
+	// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(room.Supertile), tilesHash), room.WRAM[0x12000:0x14000], 0644)
 	if m, ok := room.TilesVisitedHash[tilesHash]; ok {
 		room.TilesVisited = m
 		return

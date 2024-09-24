@@ -89,7 +89,7 @@ func processEntrance(
 		g.SupertilesLock.Unlock()
 
 		// emulate loading the room:
-		room.Lock()
+		room.Mutex.Lock()
 		//fmt.Printf("entrance $%02x supertile %s discover from entry %s start\n", eID, room.Supertile, ep)
 
 		if err = room.Init(ep); err != nil {
@@ -434,7 +434,7 @@ func processEntrance(
 			//fmt.Printf("entrance $%02x supertile %s discover from entry %s complete\n", eID, room.Supertile, ep)
 		}
 
-		room.Unlock()
+		room.Mutex.Unlock()
 	}
 
 	// render all supertiles found:
@@ -442,8 +442,8 @@ func processEntrance(
 		if supertileGifs || animateRoomDrawing {
 			wg.Add(1)
 			go func(r *RoomState) {
-				r.Lock()
-				defer r.Unlock()
+				r.Mutex.Lock()
+				defer r.Mutex.Unlock()
 
 				fmt.Printf("entrance $%02x supertile %s draw start\n", g.EntranceID, r.Supertile)
 
@@ -574,7 +574,7 @@ func (ep EntryPoint) String() string {
 }
 
 type RoomState struct {
-	sync.Mutex
+	Mutex sync.Mutex
 
 	Supertile
 
