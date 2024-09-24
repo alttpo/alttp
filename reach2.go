@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
-	"os"
 	"roomloader/taskqueue"
 	"strings"
 	"sync"
@@ -78,6 +77,8 @@ func ReachTaskInterRoom(q Q, t T) {
 	t.RoomsLock.Unlock()
 
 	reachTaskFloodfill(q, t, room)
+
+	room.RenderToNonPaletted()
 }
 
 func ReachTaskFromEntranceWorker(q Q, t T) {
@@ -125,6 +126,8 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 	room := getOrCreateRoom(t, e)
 
 	reachTaskFloodfill(q, t, room)
+
+	room.RenderToNonPaletted()
 
 	// outline Link's starting position with entranceID
 	drawOutlineBox(
@@ -236,7 +239,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 		MapCoord(read8(wram, uint32(0x0640))&2) << 11,
 	}
 
-	os.WriteFile(fmt.Sprintf("r%03X.pre.tmap", uint16(t.Supertile)), tiles, 0644)
+	// os.WriteFile(fmt.Sprintf("r%03X.pre.tmap", uint16(t.Supertile)), tiles, 0644)
 
 	// open up "locked" cell doors:
 	for i := uint32(0); i < 6; i++ {
@@ -399,47 +402,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 	// persist the current TilesVisited map in its hash(tiles) slot:
 	room.SwapTilesVisitedMap()
 
-	os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
-	os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
-
-	{
-		// render BG layers:
-		pal, bg1p, bg2p, addColor, halfColor := renderBGLayers(e.WRAM, e.VRAM[0x4000:0x8000])
-
-		g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
-		ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-
-		// overlay doors in blue rectangles:
-		clrBlue := image.NewUniform(color.NRGBA{0, 0, 255, 192})
-		for _, door := range room.Doors {
-			drawShadowedString(
-				g,
-				image.White,
-				fixed.Point26_6{X: fixed.I(int(door.Pos.Col()*8) + 8), Y: fixed.I(int(door.Pos.Row()*8) - 2)},
-				fmt.Sprintf("%02X", uint8(door.Type)),
-			)
-			drawOutlineBox(
-				g,
-				image.NewUniform(clrBlue),
-				int(door.Pos.Col()*8),
-				int(door.Pos.Row()*8),
-				4*8,
-				4*8,
-			)
-			drawOutlineBox(
-				g,
-				image.NewUniform(clrBlue),
-				int(door.Pos.Col()*8)-1,
-				int(door.Pos.Row()*8)-1,
-				4*8+2,
-				4*8+2,
-			)
-		}
-
-		// store full underworld rendering for inclusion into EG map:
-		room.Rendered = g
-		room.RenderedNRGBA = g
-	}
+	// os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
+	// os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
 
 	return
 }
@@ -574,7 +538,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	}
 
 	// push starting state:
-	startStates := make([]SE, 0, 1024)
+	startStates := make([]SE, 0, 32)
 	startStates = append(startStates, t.SE)
 
 	lifo := make([]SE, 0, 1024)
@@ -586,9 +550,36 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 		fmt.Printf("$%03X: start=%04X dir=%5s state=%d\n", uint16(t.Supertile), uint16(startState.c), startState.d, startState.s)
 
-		// start from the initial load state:
-		copy(room.WRAM[:], room.WRAMAfterLoaded[:])
-		room.SwapTilesVisitedMap()
+		if startState.s == 4 || startState.s == 5 {
+			// process tags:
+			// restore WRAM before processing tags:
+			if startState.wram != nil {
+				copy(wram[:], (*startState.wram)[:])
+			}
+			if startState.s == 5 {
+				// manipulable push block always sets this when pushed:
+				write8(wram, 0x0641, 0x01)
+			}
+			// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
+			// fmt.Printf("$%03X: tags: run; old [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
+			room.PlaceLinkAt(startState.c)
+			room.ProcessRoomTags()
+			room.RecalcAllowDirFlags()
+			room.SwapTilesVisitedMap()
+			// {
+			// 	tmp := [0x2000]byte{}
+			// 	for i := range room.TilesVisited {
+			// 		tmp[i] = 0x40
+			// 	}
+			// 	os.WriteFile(fmt.Sprintf("r%03X.%08X.visited.tmap", uint16(t.Supertile), room.CalcTilesHash()), tmp[:], 0644)
+			// }
+			// fmt.Printf("$%03X: tags: ran; new [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
+			startState.s = 0
+		} else {
+			// start from the initial load state:
+			copy(room.WRAM[:], room.WRAMAfterLoaded[:])
+			room.SwapTilesVisitedMap()
+		}
 
 		// iteratively recurse over processing stack:
 		for len(lifo) > 0 {
@@ -597,29 +588,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 			c := se.c
 			v := tiles[c]
-
-			if se.s == 4 {
-				// process tags:
-				// restore WRAM before processing tags:
-				if se.wram != nil {
-					copy(wram[:], (*se.wram)[:])
-				}
-				// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
-				// fmt.Printf("$%03X: tags: run; old [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
-				room.PlaceLinkAt(c)
-				room.ProcessRoomTags()
-				room.RecalcAllowDirFlags()
-				room.SwapTilesVisitedMap()
-				// {
-				// 	tmp := [0x2000]byte{}
-				// 	for i := range room.TilesVisited {
-				// 		tmp[i] = 0x40
-				// 	}
-				// 	os.WriteFile(fmt.Sprintf("r%03X.%08X.visited.tmap", uint16(t.Supertile), room.CalcTilesHash()), tmp[:], 0644)
-				// }
-				// fmt.Printf("$%03X: tags: ran; new [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
-				se.s = 0
-			}
 
 			if _, ok := room.TilesVisited[se.c]; ok {
 				continue
@@ -965,19 +933,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 						})
 					continue
 				}
-			} else if v == 0x4B {
-				// 4B - warp tile
-				neighborSt := room.WarpExitTo
-				ct := c | room.WarpExitLayer
-				fmt.Printf("$%03X: warp $%04X exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
-				pushJob(
-					neighborSt,
-					SE{
-						c: ct,
-						d: traverseDir,
-						s: se.s,
-					})
-				canTraverse = true
 			} else if v == 0xBE {
 				// pipe entry:
 				canTraverse = true
@@ -1055,17 +1010,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				canTurn = false
 			} else if v&0xF0 == 0x70 {
 				// manipulables:
-				if false {
-					j := v & 0x0F
-					manipProps := read16(wram, 0x0500+uint32(j)<<1)
-					if manipProps == 0x0000 {
-						// push block:
-						write8(wram, 0x0641, 0x01)
-						room.PlaceLinkAt(c)
-						room.ProcessRoomTags()
-						room.SwapTilesVisitedMap()
-					}
-				}
 				canTraverse = true
 				canTurn = true
 			} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
@@ -1083,7 +1027,33 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// make a WRAM copy to resume from:
 				wramCopy := new(WRAMArray)
 				copy((*wramCopy)[:], room.WRAM[:])
+				// process star tile switch after current floodfill exhausts itself with the current room state:
 				startStates = append(startStates, SE{c: c, d: traverseDir, s: 4, wram: wramCopy})
+			} else if v2x2 == 0x4B4B4B4B {
+				// 4B - warp tile
+				neighborSt := room.WarpExitTo
+				ct := c | room.WarpExitLayer
+				fmt.Printf("$%03X: warp $%04X exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
+				pushJob(
+					neighborSt,
+					SE{
+						c: ct,
+						d: traverseDir,
+						s: se.s,
+					})
+				canTraverse = true
+			} else if v2x2&0xF0F0F0F0 == 0x70707070 {
+				// manipulable block:
+				j := v & 0x0F
+				manipProps := read16(wram, 0x0500+uint32(j)<<1)
+				if manipProps == 0x0000 {
+					// push block:
+					// make a WRAM copy to resume from:
+					wramCopy := new(WRAMArray)
+					copy((*wramCopy)[:], room.WRAM[:])
+					// process block manipulation after current floodfill exhausts itself with the current room state:
+					startStates = append(startStates, SE{c: c, d: traverseDir, s: 5, wram: wramCopy})
+				}
 			}
 
 			// can we bonk cross a pit from this bonkable tile?
@@ -1313,4 +1283,44 @@ func (room *RoomState) SwapTilesVisitedMap() {
 
 	room.TilesVisited = make(map[MapCoord]struct{}, 0x2000)
 	room.TilesVisitedHash[tilesHash] = room.TilesVisited
+}
+
+func (room *RoomState) RenderToNonPaletted() {
+	// render BG layers:
+	// e.VRAM[0x4000:0x8000]
+	pal, bg1p, bg2p, addColor, halfColor := renderBGLayers(&room.WRAM, room.VRAMTileSet[:])
+
+	g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+	ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
+
+	// overlay doors in blue rectangles:
+	clrBlue := image.NewUniform(color.NRGBA{0, 0, 255, 192})
+	for _, door := range room.Doors {
+		drawShadowedString(
+			g,
+			image.White,
+			fixed.Point26_6{X: fixed.I(int(door.Pos.Col()*8) + 8), Y: fixed.I(int(door.Pos.Row()*8) - 2)},
+			fmt.Sprintf("%02X", uint8(door.Type)),
+		)
+		drawOutlineBox(
+			g,
+			image.NewUniform(clrBlue),
+			int(door.Pos.Col()*8),
+			int(door.Pos.Row()*8),
+			4*8,
+			4*8,
+		)
+		drawOutlineBox(
+			g,
+			image.NewUniform(clrBlue),
+			int(door.Pos.Col()*8)-1,
+			int(door.Pos.Row()*8)-1,
+			4*8+2,
+			4*8+2,
+		)
+	}
+
+	// store full underworld rendering for inclusion into EG map:
+	room.Rendered = g
+	room.RenderedNRGBA = g
 }
