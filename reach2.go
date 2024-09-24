@@ -537,8 +537,17 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 		)
 	}
 
-	// push starting state:
 	startStates := make([]SE, 0, 32)
+
+	// push kill-all-enemies state:
+	startStates = append(startStates, SE{
+		c:    t.SE.c,
+		d:    t.SE.d,
+		s:    6,
+		wram: nil,
+	})
+
+	// push starting state:
 	startStates = append(startStates, t.SE)
 
 	lifo := make([]SE, 0, 1024)
@@ -550,7 +559,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 		fmt.Printf("$%03X: start=%04X dir=%5s state=%d\n", uint16(t.Supertile), uint16(startState.c), startState.d, startState.s)
 
-		if startState.s == 4 || startState.s == 5 {
+		if startState.s == 4 || startState.s == 5 || startState.s == 6 {
 			// process tags:
 			// restore WRAM before processing tags:
 			if startState.wram != nil {
@@ -559,6 +568,16 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			if startState.s == 5 {
 				// manipulable push block always sets this when pushed:
 				write8(wram, 0x0641, 0x01)
+			} else if startState.s == 6 {
+				// kill all enemies:
+				fmt.Printf("$%03X: kill room\n", uint16(t.Supertile))
+				for j := uint32(0); j < 16; j++ {
+					if read8(wram, 0x0F60+j)&0x40 != 0 {
+						// ignore for kill rooms:
+						continue
+					}
+					write8(wram, 0x0DD0+j, 0)
+				}
 			}
 			// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
 			// fmt.Printf("$%03X: tags: run; old [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
@@ -1015,6 +1034,54 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				canTurn = true
 			} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
 				canTraverse = true
+
+				// can we hookshot to something?
+				for d := DirNorth; d < DirNone; d++ {
+					canHook := false
+					requiresHook := false
+					ct, ok := c, true
+					hookOverTiles := make([]MapCoord, 0, 16)
+					for i := 1; i <= 16; i++ {
+						if ct, _, ok = ct.MoveBy(d, 1); !ok {
+							canHook = false
+							break
+						}
+
+						// we must pass over something impassable to make the hookshot necessary:
+						if tiles[ct] == 0x20 || tiles[ct] == 0x1C {
+							requiresHook = true
+						}
+
+						if room.canHookThru(tiles[ct]) {
+							hookOverTiles = append(hookOverTiles, ct)
+							continue
+						} else if room.isHookable(tiles[ct]) {
+							// stop the hook if we hit a wall or something:
+							canHook = true
+							break
+						}
+
+						// otherwise we can't hook through or to this:
+						canHook = false
+						break
+					}
+
+					if canHook && requiresHook {
+						// prove we have space to land at:
+						ct, _, _ = ct.MoveBy(d.Opposite(), 2)
+						if room.isAlwaysWalkable(tiles[ct]) {
+							if _, ok := room.TilesVisited[ct]; !ok {
+								fmt.Printf("$%03X: hook %s at $%04X to %04X\n", uint16(t.Supertile), d, uint16(c), uint16(ct))
+								lifo = append(lifo, SE{c: ct, d: d, s: se.s})
+
+								// mark tiles as hookable:
+								for _, ch := range hookOverTiles {
+									room.Hookshot[ch] |= byte(1 << d)
+								}
+							}
+						}
+					}
+				}
 			}
 
 			// star tiles ONLY trigger when x,y is at the top-left of the 2x2 tile.
