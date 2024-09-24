@@ -1231,8 +1231,8 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				canTraverse = true
 			} else if v2x2&0xF0F0F0F0 == 0x70707070 {
 				// manipulable block:
-				j := v & 0x0F
-				mp := read16(wram, 0x0500+uint32(j)<<1)
+				j := uint32(v&0x0F) << 1
+				mp := read16(wram, 0x0500+j)
 				if mp == 0x0000 {
 					// push block:
 					// make a WRAM copy to resume from:
@@ -1240,6 +1240,49 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					copy((*wramCopy)[:], room.WRAM[:])
 					// process block manipulation after current floodfill exhausts itself with the current room state:
 					startStates = append(startStates, SE{c: c, d: traverseDir, s: reachStatePushBlock, wram: wramCopy})
+				} else if mp == 0x2020 {
+					// lift block:
+
+					// grab map16 position from $0540[v&0xF<<1]
+					m16p := read16(wram, 0x0540+j)
+					fmt.Printf("$%03X: manip at %04X\n", uint16(t.Supertile), m16p)
+
+					// check RoomData_PotItems_Pointers:#_01DB67 for room to see what to replace with
+					// list of dw RoomData_PotItems_Room0xxx
+					// repeated:
+					//   dw tilepos>>1; db item ($80 = hole)
+					//   dw #$FFFF = end of list
+					// see `RevealPotItem:#_01E6B0` for algorithm
+
+					havePotItem := false
+					potItem := byte(0x00)
+					potItemsOffs := room.e.Bus.Read16(0x01_DB67 + uint32(t.Supertile)<<1)
+					for i := 0; i < 16; i++ {
+						potItemTmap := room.e.Bus.Read16(0x01_0000 + uint32(potItemsOffs))
+						if potItemTmap == 0xFFFF {
+							break
+						}
+						if potItemTmap == m16p {
+							havePotItem = true
+							potItem = room.e.Bus.Read8(0x01_0000 + uint32(potItemsOffs) + 2)
+							break
+						}
+
+						potItemsOffs += 3
+					}
+
+					if havePotItem && potItem == 0x80 {
+						ct := uint32(m16p) >> 1
+						// replace with a large pit:
+						// TODO: draw object `#obj05BA-RoomDrawObjectData` to make the pit prettier
+						for _, offs := range []uint32{0x00, 0x01, 0x40, 0x41} {
+							tiles[ct+offs+0x00] = 0x20
+							tiles[ct+offs+0x02] = 0x20
+							tiles[ct+offs+0x80] = 0x20
+							tiles[ct+offs+0x82] = 0x20
+						}
+					}
+
 				}
 			}
 
