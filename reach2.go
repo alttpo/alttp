@@ -1256,15 +1256,15 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 					havePotItem := false
 					potItem := byte(0x00)
-					potItemsOffs := room.e.Bus.Read16(0x01_DB67 + uint32(t.Supertile)<<1)
+					potItemsOffs := room.e.Bus.Read16(alttp.RoomData_PotItems_Pointers + uint32(t.Supertile)<<1)
 					for i := 0; i < 16; i++ {
-						potItemTmap := room.e.Bus.Read16(0x01_0000 + uint32(potItemsOffs))
+						potItemTmap := room.e.Bus.Read16(alttp.RoomData_PotItems_Pointers&0xFF_0000 + uint32(potItemsOffs))
 						if potItemTmap == 0xFFFF {
 							break
 						}
 						if potItemTmap == m16p {
 							havePotItem = true
-							potItem = room.e.Bus.Read8(0x01_0000 + uint32(potItemsOffs) + 2)
+							potItem = room.e.Bus.Read8(alttp.RoomData_PotItems_Pointers&0xFF_0000 + uint32(potItemsOffs) + 2)
 							break
 						}
 

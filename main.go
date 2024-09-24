@@ -76,6 +76,58 @@ var fastRomBank uint32 = 0
 
 var roomsWithUnreachableWarpPits map[Supertile]bool
 
+type romPointers struct {
+	Module_MainRouting uint32 // 0x00_80B5
+
+	Underworld_LoadRoom                         uint32 // 0x01_873A
+	Underworld_LoadCustomTileAttributes         uint32 // 0x0F_FD65
+	Underworld_LoadAttributeTable               uint32 // 0x01_B8BF
+	Underworld_LoadEntrance_DoPotsBlocksTorches uint32 // 0x02_D854
+
+	Module06_UnderworldLoad_after_JSR_Underworld_LoadEntrance uint32 // 0x02_8157
+
+	LoadDefaultTileTypes uint32 // 0x0F_FD2A
+
+	Intro_InitializeDefaultGFX                                             uint32 // 0x0C_C208
+	Intro_InitializeDefaultGFX_after_JSL_DecompressAnimatedUnderworldTiles uint32 // 0x0C_C237
+
+	Intro_CreateTextPointers      uint32 // 0x02_8022
+	DecompressFontGFX             uint32 // 0x0E_F572
+	LoadItemGFXIntoWRAM4BPPBuffer uint32 // 0x00_D271
+
+	InitializeSaveFile uint32 // 0x0C_DB3E
+	CopySaveToWRAM     uint32 // 0x0C_CEB2
+
+	Ancilla_TerminateSelectInteractives uint32 // 0x09_AC57
+
+	NMI_PrepareSprites uint32 // 0x00_85FC
+	NMI_DoUpdates      uint32 // 0x00_89E0
+	NMI_ReadJoypads    uint32 // 0x00_83D1
+	ClearOAMBuffer     uint32 // 0x00_841E
+
+	Underworld_HandleRoomTags uint32 // 0x01_C2FD
+
+	Patch_JSR_Underworld_LoadSongBankIfNeeded uint32 // 0x02_8293
+	Underworld_LoadSongBankIfNeeded           uint32 // 0x02_82BC
+
+	Patch_RebuildHUD_Keys uint32 // 0x0D_FA88 patch to RTL
+
+	Patch_Sprite_PrepOAMCoord uint32 // 0x06_E48B
+
+	Patch_LoadSongBank uint32 // 0x00_8888
+
+	RoomData_PotItems_Pointers uint32 // 0x01_DB67
+
+	SpriteHitBox_OffsetXLow  uint32
+	SpriteHitBox_OffsetXHigh uint32
+	SpriteHitBox_Width       uint32
+	SpriteHitBox_OffsetYLow  uint32
+	SpriteHitBox_OffsetYHigh uint32
+	SpriteHitBox_Height      uint32
+}
+
+var alttp romPointers
+
 func main() {
 	defer func() {
 		if err := recover(); err != nil {
@@ -344,6 +396,57 @@ func main() {
 		} else {
 			fmt.Println("SlowROM")
 			fastRomBank = 0
+		}
+
+		// JP 1.0:
+		alttp = romPointers{
+			Module_MainRouting: 0x00_80B5,
+
+			Underworld_LoadRoom:                         0x01_873A,
+			Underworld_LoadCustomTileAttributes:         0x0F_FD65,
+			Underworld_LoadAttributeTable:               0x01_B8BF,
+			Underworld_LoadEntrance_DoPotsBlocksTorches: 0x02_D854,
+
+			Module06_UnderworldLoad_after_JSR_Underworld_LoadEntrance: 0x02_8157,
+
+			LoadDefaultTileTypes: 0x0F_FD2A,
+
+			Intro_InitializeDefaultGFX: 0x0C_C208,
+			Intro_InitializeDefaultGFX_after_JSL_DecompressAnimatedUnderworldTiles: 0x0C_C237,
+
+			Intro_CreateTextPointers:      0x02_8022,
+			DecompressFontGFX:             0x0E_F572,
+			LoadItemGFXIntoWRAM4BPPBuffer: 0x00_D271,
+
+			InitializeSaveFile: 0x0C_DB3E,
+			CopySaveToWRAM:     0x0C_CEB2,
+
+			Ancilla_TerminateSelectInteractives: 0x09_AC57,
+
+			NMI_PrepareSprites: 0x00_85FC,
+			NMI_DoUpdates:      0x00_89E0,
+			NMI_ReadJoypads:    0x00_83D1,
+			ClearOAMBuffer:     0x00_841E,
+
+			Underworld_HandleRoomTags: 0x01_C2FD,
+
+			Patch_JSR_Underworld_LoadSongBankIfNeeded: 0x02_8293,
+			Underworld_LoadSongBankIfNeeded:           0x02_82BC,
+
+			Patch_RebuildHUD_Keys: 0x0D_FA88,
+
+			Patch_Sprite_PrepOAMCoord: 0x06_E48B,
+
+			Patch_LoadSongBank: 0x00_8888,
+
+			RoomData_PotItems_Pointers: 0x01_DB67,
+
+			SpriteHitBox_OffsetXLow:  0x06_F735,
+			SpriteHitBox_OffsetXHigh: 0x06_F755,
+			SpriteHitBox_Width:       0x06_F775,
+			SpriteHitBox_OffsetYLow:  0x06_F795,
+			SpriteHitBox_OffsetYHigh: 0x06_F7B5,
+			SpriteHitBox_Height:      0x06_F7D5,
 		}
 	}
 
@@ -1261,10 +1364,10 @@ func setupAlttp(e *System) {
 	// .offset_y_high#_06F7B5
 	//        .height#_06F7D5
 	for i := uint32(0); i < 32; i++ {
-		hitbox[i].X = int(int8(e.Bus.Read8(0x06_F735 + i)))
-		hitbox[i].Y = int(int8(e.Bus.Read8(0x06_F795 + i)))
-		hitbox[i].W = int(int8(e.Bus.Read8(0x06_F775 + i)))
-		hitbox[i].H = int(int8(e.Bus.Read8(0x06_F7D5 + i)))
+		hitbox[i].X = int(int8(e.Bus.Read8(alttp.SpriteHitBox_OffsetXLow + i)))
+		hitbox[i].Y = int(int8(e.Bus.Read8(alttp.SpriteHitBox_OffsetYLow + i)))
+		hitbox[i].W = int(int8(e.Bus.Read8(alttp.SpriteHitBox_Width + i)))
+		hitbox[i].H = int(int8(e.Bus.Read8(alttp.SpriteHitBox_Height + i)))
 	}
 
 	// initialize game:
@@ -1299,12 +1402,12 @@ func setupAlttp(e *System) {
 
 			// loads header and draws room
 			a.Comment("Underworld_LoadRoom#_01873A")
-			a.JSL(fastRomBank | 0x01_873A)
+			a.JSL(fastRomBank | alttp.Underworld_LoadRoom)
 
 			a.Comment("Underworld_LoadCustomTileAttributes#_0FFD65")
-			a.JSL(fastRomBank | 0x0F_FD65)
+			a.JSL(fastRomBank | alttp.Underworld_LoadCustomTileAttributes)
 			a.Comment("Underworld_LoadAttributeTable#_01B8BF")
-			a.JSL(fastRomBank | 0x01_B8BF)
+			a.JSL(fastRomBank | alttp.Underworld_LoadAttributeTable)
 
 			// then JSR Underworld_LoadHeader#_01B564 to reload the doors into $19A0[16]
 			//a.BRA("jslUnderworld_LoadHeader")
@@ -1331,7 +1434,7 @@ func setupAlttp(e *System) {
 		a.Comment("in Underworld_LoadEntrance_DoPotsBlocksTorches at PHB and bank switch to $7e")
 		a.JSR_abs(0xD854)
 		a.Comment("Module06_UnderworldLoad after JSR Underworld_LoadEntrance")
-		a.JMP_abs_imm16_w(0x8157)
+		a.JMP_abs_imm16_w(uint16(alttp.Module06_UnderworldLoad_after_JSR_Underworld_LoadEntrance & 0xFFFF))
 		a.Comment("implied RTL")
 		a.WriteTextTo(e.Logger)
 	}
@@ -1355,9 +1458,9 @@ func setupAlttp(e *System) {
 		a.SEP(0x30)
 
 		a.Comment("LoadDefaultTileTypes#_0FFD2A")
-		a.JSL(fastRomBank | 0x0F_FD2A)
+		a.JSL(fastRomBank | alttp.LoadDefaultTileTypes)
 		a.Comment("Intro_InitializeDefaultGFX#_0CC208")
-		a.JSL(0x0C_C208)
+		a.JSL(alttp.Intro_InitializeDefaultGFX)
 		//a.Comment("LoadDefaultGraphics#_00E310")
 		//a.JSL(fastRomBank | 0x00_E310)
 		//a.Comment("InitializeTilesets#_00E1DB")
@@ -1367,22 +1470,22 @@ func setupAlttp(e *System) {
 		//a.JSL(fastRomBank | 0x00_D377)
 
 		a.Comment("Intro_CreateTextPointers#_028022")
-		a.JSL(fastRomBank | 0x02_8022)
+		a.JSL(fastRomBank | alttp.Intro_CreateTextPointers)
 		a.Comment("DecompressFontGFX#_0EF572")
-		a.JSL(fastRomBank | 0x0E_F572)
+		a.JSL(fastRomBank | alttp.DecompressFontGFX)
 		a.Comment("LoadItemGFXIntoWRAM4BPPBuffer#_00D271")
-		a.JSL(fastRomBank | 0x00_D271)
+		a.JSL(fastRomBank | alttp.LoadItemGFXIntoWRAM4BPPBuffer)
 
 		// initialize SRAM save file:
 		a.REP(0x10)
 		a.LDX_imm16_w(0)
 		a.SEP(0x10)
 		a.Comment("InitializeSaveFile#_0CDB3E")
-		a.JSL(0x0C_DB3E)
+		a.JSL(alttp.InitializeSaveFile)
 
 		// this initializes some important DMA transfer source addresses to eliminate garbage transfers to VRAM[0]
 		a.Comment("CopySaveToWRAM#_0CCEB2")
-		a.JSL(0x0C_CEB2)
+		a.JSL(alttp.CopySaveToWRAM)
 
 		// general world state:
 		a.Comment("disable rain")
@@ -1419,7 +1522,7 @@ func setupAlttp(e *System) {
 		// DeleteCertainAncillaeStopDashing#_028A0E
 		a.Comment("DeleteCertainAncillaeStopDashing")
 		// Ancilla_TerminateSelectInteractives#_09AC57
-		a.JSL(0x09_AC57)
+		a.JSL(fastRomBank | alttp.Ancilla_TerminateSelectInteractives)
 		a.LDA_abs(0x0372)
 		a.BEQ("mainRouting")
 
@@ -1464,16 +1567,16 @@ func setupAlttp(e *System) {
 		a.INC_dp(0x1A)
 		a.Comment("JSR ClearOAMBuffer")
 		// ClearOAMBuffer#_00841E
-		a.JSR_abs(0x841E)
+		a.JSR_abs(uint16(alttp.ClearOAMBuffer & 0xFFFF))
 		a.Comment("JSL Module_MainRouting")
-		a.JSL(fastRomBank | 0x00_80B5)
+		a.JSL(fastRomBank | alttp.Module_MainRouting)
 		a.BRA("updateVRAM")
 
 		loadSupertilePC = a.Label("loadSupertile")
 		a.SEP(0x30)
 		a.INC_abs(0x0710)
 		a.Comment("Intro_InitializeDefaultGFX after JSL DecompressAnimatedUnderworldTiles")
-		a.JSL(fastRomBank | 0x0C_C237)
+		a.JSL(fastRomBank | alttp.Intro_InitializeDefaultGFX_after_JSL_DecompressAnimatedUnderworldTiles)
 		a.STZ_dp(0x11)
 		a.Comment("LoadUnderworldSupertile")
 		a.JSL(b02LoadUnderworldSupertilePC)
@@ -1491,7 +1594,7 @@ func setupAlttp(e *System) {
 		a.Label("updateVRAM")
 		// this code sets up the DMA transfer parameters for animated BG tiles:
 		a.Comment("NMI_PrepareSprites")
-		a.JSR_abs(0x85FC)
+		a.JSR_abs(uint16(alttp.NMI_PrepareSprites & 0xFFFF))
 
 		// real NMI starts here:
 		nmiRoutinePC = a.Label("NMIRoutine")
@@ -1500,9 +1603,9 @@ func setupAlttp(e *System) {
 		a.STA_abs(0x2100) // INIDISP
 		a.STZ_abs(0x420C) // HDMAEN
 		a.Comment("NMI_DoUpdates")
-		a.JSR_abs(0x89E0)
+		a.JSR_abs(uint16(alttp.NMI_DoUpdates & 0xFFFF))
 		a.Comment("NMI_ReadJoypads")
-		a.JSR_abs(0x83D1)
+		a.JSR_abs(uint16(alttp.NMI_ReadJoypads & 0xFFFF))
 
 		// WDM triggers an abort for values >= 10
 		donePC = a.Label("done")
@@ -1537,7 +1640,7 @@ func setupAlttp(e *System) {
 		//a.Comment("Graphics_LoadChrHalfSlot#_00E43A")
 		//a.JSL(fastRomBank | 0x00_E43A)
 		a.Comment("Underworld_HandleRoomTags#_01C2FD")
-		a.JSL(fastRomBank | 0x01_C2FD)
+		a.JSL(fastRomBank | alttp.Underworld_HandleRoomTags)
 
 		// check if submodule changed:
 		a.LDA_dp(0x11)
@@ -1545,12 +1648,12 @@ func setupAlttp(e *System) {
 
 		a.Label("continue_submodule")
 		a.Comment("JSL Module_MainRouting")
-		a.JSL(fastRomBank | 0x00_80B5)
+		a.JSL(fastRomBank | alttp.Module_MainRouting)
 
 		a.Label("no_submodule")
 		// this code sets up the DMA transfer parameters for animated BG tiles:
 		a.Comment("NMI_PrepareSprites")
-		a.JSR_abs(0x85FC)
+		a.JSR_abs(uint16(alttp.NMI_PrepareSprites & 0xFFFF))
 
 		// fake NMI:
 		//a.REP(0x30)
@@ -1562,7 +1665,7 @@ func setupAlttp(e *System) {
 		//a.PLB()
 		//a.SEP(0x30)
 		a.Comment("NMI_DoUpdates")
-		a.JSR_abs(0x89E0) // NMI_DoUpdates
+		a.JSR_abs(uint16(alttp.NMI_DoUpdates & 0xFFFF))
 		//a.PLB()
 		//a.PLD()
 
@@ -1594,13 +1697,13 @@ func setupAlttp(e *System) {
 		a.INC_dp(0x1A)
 		a.Comment("JSR ClearOAMBuffer")
 		// ClearOAMBuffer#_00841E
-		a.JSR_abs(0x841E)
+		a.JSR_abs(uint16(alttp.ClearOAMBuffer & 0xFFFF))
 		a.Comment("JSL Module_MainRouting")
-		a.JSL(fastRomBank | 0x00_80B5)
+		a.JSL(fastRomBank | alttp.Module_MainRouting)
 
 		// this code sets up the DMA transfer parameters for animated BG tiles:
 		a.Comment("NMI_PrepareSprites")
-		a.JSR_abs(0x85FC)
+		a.JSR_abs(uint16(alttp.NMI_PrepareSprites & 0xFFFF))
 
 		// fake NMI:
 		//a.REP(0x30)
@@ -1612,7 +1715,7 @@ func setupAlttp(e *System) {
 		//a.PLB()
 		//a.SEP(0x30)
 		a.Comment("NMI_DoUpdates")
-		a.JSR_abs(0x89E0) // NMI_DoUpdates
+		a.JSR_abs(uint16(alttp.NMI_DoUpdates & 0xFFFF)) // NMI_DoUpdates
 		//a.PLB()
 		//a.PLD()
 
@@ -1627,9 +1730,10 @@ func setupAlttp(e *System) {
 
 	{
 		// skip over music & sfx loading since we did not implement APU registers:
-		a = newEmitterAt(e, fastRomBank|0x02_8293, true)
+		a = newEmitterAt(e, fastRomBank|alttp.Patch_JSR_Underworld_LoadSongBankIfNeeded, true)
+		// TODO: verify content before patching
 		//#_028293: JSR Underworld_LoadSongBankIfNeeded
-		a.JMP_abs_imm16_w(0x82BC)
+		a.JMP_abs_imm16_w(uint16(alttp.Underworld_LoadSongBankIfNeeded & 0xFFFF))
 		//.exit
 		//#_0282BC: SEP #$20
 		//#_0282BE: RTL
@@ -1638,7 +1742,8 @@ func setupAlttp(e *System) {
 
 	{
 		// patch out RebuildHUD:
-		a = newEmitterAt(e, fastRomBank|0x0D_FA88, true)
+		a = newEmitterAt(e, fastRomBank|alttp.Patch_RebuildHUD_Keys, true)
+		// TODO: verify content before patching
 		//RebuildHUD_Keys:
 		//	#_0DFA88: STA.l $7EF36F
 		a.RTL()
@@ -1649,14 +1754,14 @@ func setupAlttp(e *System) {
 		// patch out Sprite_PrepOAMCoord to not disable offscreen sprites.
 		// Sprite_PrepOAMCoord_disable#_06E48B: INC.w $0F00,X  (INC,X = $FE)
 		// to                                   STZ.w $0F00,X  (STZ,X = $9E)
-		a = newEmitterAt(e, fastRomBank|0x06_E48B, true)
+		a = newEmitterAt(e, fastRomBank|alttp.Patch_Sprite_PrepOAMCoord, true)
 		a.STZ_abs_x(0x0F00)
 		a.WriteTextTo(e.Logger)
 	}
 
 	{
 		// patch out LoadSongBank#_008888
-		a = newEmitterAt(e, fastRomBank|0x00_8888, true)
+		a = newEmitterAt(e, fastRomBank|alttp.Patch_LoadSongBank, true)
 		a.RTS()
 		a.WriteTextTo(e.Logger)
 	}
