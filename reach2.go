@@ -574,6 +574,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			// 	os.WriteFile(fmt.Sprintf("r%03X.%08X.visited.tmap", uint16(t.Supertile), room.CalcTilesHash()), tmp[:], 0644)
 			// }
 			// fmt.Printf("$%03X: tags: ran; new [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
+
 			startState.s = 0
 		} else {
 			// start from the initial load state:
@@ -1283,14 +1284,30 @@ func (room *RoomState) SwapTilesVisitedMap() {
 
 	room.TilesVisited = make(map[MapCoord]struct{}, 0x2000)
 	room.TilesVisitedHash[tilesHash] = room.TilesVisited
+
+	// render the new room state iff it's not been seen yet:
+	{
+		g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+		room.renderToNonPaletted(g)
+		exportPNG(fmt.Sprintf("r%03X.%08X.png", uint16(room.Supertile), tilesHash), g)
+	}
 }
 
 func (room *RoomState) RenderToNonPaletted() {
+	g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+
+	room.renderToNonPaletted(g)
+
+	// store full underworld rendering for inclusion into EG map:
+	room.Rendered = g
+	room.RenderedNRGBA = g
+}
+
+func (room *RoomState) renderToNonPaletted(g *image.NRGBA) {
 	// render BG layers:
 	// e.VRAM[0x4000:0x8000]
 	pal, bg1p, bg2p, addColor, halfColor := renderBGLayers(&room.WRAM, room.VRAMTileSet[:])
 
-	g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
 	ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
 
 	// overlay doors in blue rectangles:
@@ -1319,8 +1336,4 @@ func (room *RoomState) RenderToNonPaletted() {
 			4*8+2,
 		)
 	}
-
-	// store full underworld rendering for inclusion into EG map:
-	room.Rendered = g
-	room.RenderedNRGBA = g
 }
