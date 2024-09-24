@@ -555,7 +555,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	for len(startStates) > 0 {
 		startState := startStates[len(startStates)-1]
 		startStates = startStates[:len(startStates)-1]
-		lifo = append(lifo, startState)
 
 		fmt.Printf("$%03X: start=%04X dir=%5s state=%d\n", uint16(t.Supertile), uint16(startState.c), startState.d, startState.s)
 
@@ -570,13 +569,22 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				write8(wram, 0x0641, 0x01)
 			} else if startState.s == 6 {
 				// kill all enemies:
-				fmt.Printf("$%03X: kill room\n", uint16(t.Supertile))
+				killedOne := false
 				for j := uint32(0); j < 16; j++ {
 					if read8(wram, 0x0F60+j)&0x40 != 0 {
 						// ignore for kill rooms:
 						continue
 					}
-					write8(wram, 0x0DD0+j, 0)
+					if read8(wram, 0x0DD0+j) != 0 {
+						write8(wram, 0x0DD0+j, 0)
+						killedOne = true
+					}
+				}
+				if killedOne {
+					fmt.Printf("$%03X: kill room\n", uint16(t.Supertile))
+				} else {
+					// nothing killed so no tag to process:
+					continue
 				}
 			}
 			// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
@@ -600,6 +608,8 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			copy(room.WRAM[:], room.WRAMAfterLoaded[:])
 			room.SwapTilesVisitedMap()
 		}
+
+		lifo = append(lifo, startState)
 
 		// iteratively recurse over processing stack:
 		for len(lifo) > 0 {
