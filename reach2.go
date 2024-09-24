@@ -1051,32 +1051,62 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					requiresHook := false
 					ct, ok := c, true
 					hookOverTiles := make([]MapCoord, 0, 16)
+					mode := 0
+					ledges := 0
 					for i := 1; i <= 16; i++ {
 						if ct, _, ok = ct.MoveBy(d, 1); !ok {
 							canHook = false
 							break
 						}
 
-						// we must pass over something impassable to make the hookshot necessary:
-						if tiles[ct] == 0x20 || tiles[ct] == 0x1C {
-							requiresHook = true
-						}
+						if mode == 0 {
+							// we must pass over something impassable to make the hookshot necessary:
+							if tiles[ct] == 0x28 || tiles[ct] == 0x29 {
+								requiresHook = true
+								ledges ^= 1
+								mode = 1
+								continue
+							} else if tiles[ct] == 0x2A || tiles[ct] == 0x2B {
+								requiresHook = true
+								ledges ^= 1
+								mode = 2
+								continue
+							}
 
-						if room.canHookThru(tiles[ct]) {
-							hookOverTiles = append(hookOverTiles, ct)
-							continue
-						} else if room.isHookable(tiles[ct]) {
-							// stop the hook if we hit a wall or something:
-							canHook = true
+							if tiles[ct] == 0x20 || tiles[ct] == 0x1C {
+								requiresHook = true
+							}
+
+							if room.canHookThru(tiles[ct]) {
+								hookOverTiles = append(hookOverTiles, ct)
+								continue
+							} else if room.isHookable(tiles[ct]) {
+								// stop the hook if we hit a wall or something:
+								canHook = true
+								break
+							}
+
+							// otherwise we can't hook through or to this:
+							canHook = false
 							break
+						} else if mode == 1 {
+							// north/south ledges:
+							if tiles[ct] == 0x28 || tiles[ct] == 0x29 {
+								requiresHook = true
+								ledges ^= 1
+								mode = 0
+							}
+						} else if mode == 2 {
+							if tiles[ct] == 0x2A || tiles[ct] == 0x2B {
+								requiresHook = true
+								ledges ^= 1
+								mode = 0
+							}
 						}
-
-						// otherwise we can't hook through or to this:
-						canHook = false
-						break
 					}
 
-					if canHook && requiresHook {
+					// must have even number of ledge pairs:
+					if canHook && requiresHook && ledges == 0 {
 						// prove we have space to land at:
 						ct, _, _ = ct.MoveBy(d.Opposite(), 2)
 						if room.isAlwaysWalkable(tiles[ct]) {
