@@ -84,6 +84,7 @@ func main() {
 		}
 	}()
 
+	nWorkers := -1
 	entranceStr := ""
 	entranceMinStr, entranceMaxStr := "", ""
 	oopsAllStr, excludeSpritesStr := "", ""
@@ -113,6 +114,7 @@ func main() {
 	flag.StringVar(&entranceMinStr, "entmin", "0", "entrance ID range minimum (hex)")
 	flag.StringVar(&entranceMaxStr, "entmax", "84", "entrance ID range maximum (hex)")
 	flag.BoolVar(&staticEntranceMap, "static", false, "use static entrance->supertile map from JP 1.0")
+	flag.IntVar(&nWorkers, "n", -1, "number of parallel workers")
 	flag.Parse()
 
 	excludeSprites = []uint8{
@@ -439,12 +441,8 @@ func main() {
 		roomsMap := make(map[uint16]*RoomState, 0x128)
 		roomsLock := sync.Mutex{}
 
-		var nWorkers int
-		if true {
+		if nWorkers <= 0 {
 			nWorkers = runtime.NumCPU()
-		} else {
-			// for debugging
-			nWorkers = 1
 		}
 		q := taskqueue.NewQ(nWorkers, 0x1000, ReachTaskFromEntranceWorker)
 
