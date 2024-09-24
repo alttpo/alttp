@@ -730,6 +730,51 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					lifo = append(lifo, SE{c: c, d: d, s: se.s})
 				}
 				continue
+			} else if se.s == 7 {
+				// swimming:
+				if v == 0x08 {
+					canTraverse = true
+					canTurn = true
+				} else if v == 0x0A || v == 0x1D || v == 0x3D {
+					// 0A - deep water ladder
+					// 1D - north stairs
+					// 3D - south stairs
+					ct := c & ^MapCoord(0x1000)
+					d := traverseDir
+					if v == 0x1D {
+						d = DirNorth
+					} else if v == 0x3D {
+						d = DirSouth
+					}
+					if ct, _, ok := ct.MoveBy(d, 1); ok {
+						lifo = append(lifo, SE{c: ct, d: d, s: 0})
+					}
+					continue
+				}
+
+				if !canTraverse {
+					continue
+				}
+
+				room.Reachable[c] = v
+
+				if canTurn {
+					// turn from here:
+					if c, d, ok := c.MoveBy(traverseDir.Opposite(), traverseBy); ok {
+						lifo = append(lifo, SE{c: c, d: d, s: se.s})
+					}
+					if c, d, ok := c.MoveBy(traverseDir.RotateCW(), traverseBy); ok {
+						lifo = append(lifo, SE{c: c, d: d, s: se.s})
+					}
+					if c, d, ok := c.MoveBy(traverseDir.RotateCCW(), traverseBy); ok {
+						lifo = append(lifo, SE{c: c, d: d, s: se.s})
+					}
+				}
+				// traverse in the primary direction:
+				if c, d, ok := c.MoveBy(traverseDir, traverseBy); ok {
+					lifo = append(lifo, SE{c: c, d: d, s: se.s})
+				}
+				continue
 			}
 
 			if v >= 0x80 && v <= 0x8D {
@@ -1000,6 +1045,12 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					// traverseDir = DirWest
 					traverseBy = 5
 				}
+			} else if v == 0x08 {
+				// 08 - deep water
+				// room 76 has this on layer 1 in place of a normal stairwell into the pool
+				if ct, d, ok := c.MoveBy(traverseDir, 2); ok {
+					lifo = append(lifo, SE{c: ct, d: d, s: 0})
+				}
 			} else if v == 0x1C && !c.IsLayer2() {
 				if tiles[c|0x1000] == 0x0C {
 					canTraverse = true
@@ -1044,6 +1095,18 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				canTurn = true
 			} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
 				canTraverse = true
+
+				// check for water below us:
+				{
+					ct := c | 0x1000
+					if ct != c && tiles[ct] == 0x08 {
+						// if v != 0x08 && v != 0x0D {
+						// 	r.pushAllDirections(t, StateSwim)
+						// }
+						// start swimming:
+						lifo = append(lifo, SE{c: ct, d: traverseDir, s: 7})
+					}
+				}
 
 				// can we hookshot to something?
 				for d := DirNorth; d < DirNone; d++ {
