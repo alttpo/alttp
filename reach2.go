@@ -75,8 +75,6 @@ func ReachTaskInterRoom(q Q, t T) {
 		room = createRoom(t, e)
 		t.Rooms[uint16(t.Supertile)] = room
 	}
-	// copy((*room.e.WRAM)[:], room.WRAM[:])
-	// copy((*room.e.VRAM)[:], room.VRAMTileSet[:])
 	t.RoomsLock.Unlock()
 
 	reachTaskFloodfill(q, t, room)
@@ -396,6 +394,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 		}
 	}
 
+	copy(room.WRAMAfterLoaded[:], (*e.WRAM)[:])
+
 	// persist the current TilesVisited map in its hash(tiles) slot:
 	room.SwapTilesVisitedMap()
 
@@ -586,6 +586,10 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 		fmt.Printf("$%03X: start=%04X dir=%5s state=%d\n", uint16(t.Supertile), uint16(startState.c), startState.d, startState.s)
 
+		// start from the initial load state:
+		copy(room.WRAM[:], room.WRAMAfterLoaded[:])
+		room.SwapTilesVisitedMap()
+
 		// iteratively recurse over processing stack:
 		for len(lifo) > 0 {
 			se := lifo[len(lifo)-1]
@@ -596,16 +600,24 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 			if se.s == 4 {
 				// process tags:
-				// fmt.Printf("$%03X: tags: run; old v=%02X\n", uint16(t.Supertile), v)
 				// restore WRAM before processing tags:
 				if se.wram != nil {
 					copy(wram[:], (*se.wram)[:])
 				}
-				os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
+				// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
+				// fmt.Printf("$%03X: tags: run; old [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
 				room.PlaceLinkAt(c)
 				room.ProcessRoomTags()
+				room.RecalcAllowDirFlags()
 				room.SwapTilesVisitedMap()
-				// fmt.Printf("$%03X: tags: ran; new v=%02X\n", uint16(t.Supertile), tiles[c])
+				// {
+				// 	tmp := [0x2000]byte{}
+				// 	for i := range room.TilesVisited {
+				// 		tmp[i] = 0x40
+				// 	}
+				// 	os.WriteFile(fmt.Sprintf("r%03X.%08X.visited.tmap", uint16(t.Supertile), room.CalcTilesHash()), tmp[:], 0644)
+				// }
+				// fmt.Printf("$%03X: tags: ran; new [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
 				se.s = 0
 			}
 
@@ -1056,10 +1068,14 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				}
 				canTraverse = true
 				canTurn = true
-			} else if v == 0x3A {
-				// 3A - inactive star tile
+			} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
 				canTraverse = true
-			} else if v == 0x3B {
+			}
+
+			// star tiles ONLY trigger when x,y is at the top-left of the 2x2 tile.
+			v2x2 := uint32(read16(tiles, uint32(c)))<<16 | uint32(read16(tiles, uint32(c+0x40)))
+			if v2x2 == 0x3A3A3A3A || v2x2 == 0x3B3B3B3B {
+				// 3A - inactive star tile
 				// 3B - active star tile
 				canTraverse = true
 				canTurn = true
@@ -1068,8 +1084,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				wramCopy := new(WRAMArray)
 				copy((*wramCopy)[:], room.WRAM[:])
 				startStates = append(startStates, SE{c: c, d: traverseDir, s: 4, wram: wramCopy})
-			} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
-				canTraverse = true
 			}
 
 			// can we bonk cross a pit from this bonkable tile?
@@ -1233,18 +1247,20 @@ func (r *RoomState) ProcessRoomTags() bool {
 
 	old04BC := read8(wram, 0x04BC)
 
-	e.CPU.OnWDM = func(wdm byte) {
-		// capture frame to GIF:
-		if wdm == 0xFF {
-			// fmt.Println("WDM: frame")
-		}
-	}
+	// e.CPU.OnWDM = func(wdm byte) {
+	// 	// capture frame to GIF:
+	// 	if wdm == 0xFF {
+	// 		fmt.Println("WDM: frame")
+	// 	}
+	// }
 
+	// e.LoggerCPU = os.Stdout
 	if err := e.ExecAt(b00HandleRoomTagsPC, 0); err != nil {
 		panic(err)
 	}
+	// e.LoggerCPU = nil
 
-	e.CPU.OnWDM = nil
+	// e.CPU.OnWDM = nil
 
 	// if $AE or $AF (room tags) are modified, then the tag was activated:
 	newAE, newAF := read8(wram, 0xAE), read8(wram, 0xAF)
@@ -1263,6 +1279,20 @@ func (r *RoomState) ProcessRoomTags() bool {
 	return false
 }
 
+func (room *RoomState) RecalcAllowDirFlags() {
+	tilesOld := room.WRAMAfterLoaded[0x12000:0x14000]
+	tiles := room.WRAM[0x12000:0x14000]
+
+	for i := range room.AllowDirFlags {
+		// don't update AllowDirFlags if tiles haven't changed:
+		if tilesOld[i] == tiles[i] {
+			continue
+		}
+
+		room.AllowDirFlags[i] = tileAllowableDirFlags(tiles[i])
+	}
+}
+
 func (room *RoomState) CalcTilesHash() (tilesHash uint64) {
 	h := fnv.New64()
 	h.Write(room.WRAM[0x12000:0x14000])
@@ -1273,9 +1303,9 @@ func (room *RoomState) CalcTilesHash() (tilesHash uint64) {
 
 func (room *RoomState) SwapTilesVisitedMap() {
 	tilesHash := room.CalcTilesHash()
-
-	fmt.Printf("$%03X: swap hash=%08X\n", uint16(room.Supertile), tilesHash)
+	// fmt.Printf("$%03X: tiles hash=%08X\n", uint16(room.Supertile), tilesHash)
 	// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(room.Supertile), tilesHash), room.WRAM[0x12000:0x14000], 0644)
+
 	if m, ok := room.TilesVisitedHash[tilesHash]; ok {
 		room.TilesVisited = m
 		return
