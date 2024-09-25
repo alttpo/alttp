@@ -260,11 +260,6 @@ func createRoom(t T, e *System) (room *RoomState) {
 	wram := (room.WRAM)[:]
 	tiles := wram[0x12000:0x14000]
 
-	for i := range room.Reachable {
-		room.Reachable[i] = 0x01
-		room.AllowDirFlags[i] = tileAllowableDirFlags(tiles[i])
-	}
-
 	room.WarpExitTo = Supertile(read8(wram, 0xC000)) | (t.Supertile & 0x100)
 	room.StairExitTo = [4]Supertile{
 		Supertile(read8(wram, uint32(0xC001))) | (t.Supertile & 0x100),
@@ -281,6 +276,32 @@ func createRoom(t T, e *System) (room *RoomState) {
 	}
 
 	os.WriteFile(fmt.Sprintf("r%03X.pre.tmap", uint16(t.Supertile)), tiles, 0644)
+
+	for i := range room.Reachable {
+		room.Reachable[i] = 0x01
+	}
+
+	room.preprocessRoom()
+
+	copy(room.WRAMAfterLoaded[:], (*e.WRAM)[:])
+
+	// persist the current TilesVisited map in its hash(tiles) slot:
+	room.SwapTilesVisitedMap()
+
+	// os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
+	// os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
+
+	return
+}
+
+func (room *RoomState) preprocessRoom() {
+	wram := (room.WRAM)[:]
+	tiles := wram[0x12000:0x14000]
+
+	// calculate allowable traversal directions per tile:
+	for i := range room.Reachable {
+		room.AllowDirFlags[i] = tileAllowableDirFlags(tiles[i])
+	}
 
 	// open up "locked" cell doors:
 	for i := uint32(0); i < 6; i++ {
@@ -410,7 +431,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 			}
 		}
 
-		fmt.Printf("$%03X: door type=%s dir=%s pos=%s: %s\n", uint16(t.Supertile), door.Type, door.Dir, door.Pos, dbg.String())
+		fmt.Printf("$%03X: door type=%s dir=%s pos=%s: %s\n", uint16(room.Supertile), door.Type, door.Dir, door.Pos, dbg.String())
 
 		c, ok = doorwayC, true
 
@@ -438,15 +459,19 @@ func createRoom(t T, e *System) (room *RoomState) {
 		}
 	}
 
-	copy(room.WRAMAfterLoaded[:], (*e.WRAM)[:])
-
-	// persist the current TilesVisited map in its hash(tiles) slot:
-	room.SwapTilesVisitedMap()
-
-	// os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
-	// os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
-
-	return
+	// only allow edge traversal in edge directions:
+	for i := 0; i < 0x40; i++ {
+		// east/west only on east/west edges:
+		room.AllowDirFlags[i*0x40+0x00] &= 0b0000_1100
+		room.AllowDirFlags[i*0x40+0x01] &= 0b0000_1100
+		room.AllowDirFlags[i*0x40+0x3E] &= 0b0000_1100
+		room.AllowDirFlags[i*0x40+0x3F] &= 0b0000_1100
+		// north/south only on north/south edges:
+		room.AllowDirFlags[i+0x00<<6] &= 0b0000_0011
+		room.AllowDirFlags[i+0x01<<6] &= 0b0000_0011
+		room.AllowDirFlags[i+0x3E<<6] &= 0b0000_0011
+		room.AllowDirFlags[i+0x3F<<6] &= 0b0000_0011
+	}
 }
 
 func tileAllowableDirFlags(v uint8) uint8 {
@@ -1407,6 +1432,16 @@ func canTraverseDir(allowDirFlags byte, d Direction) bool {
 	return allowDirFlags&uint8(1<<d) != 0
 }
 
+func canEdgeTraverseDir(c MapCoord, d Direction) bool {
+	// east/west only on east/west edges:
+	if (c.Col() <= 1 || c.Col() >= 0x3E) && (d != DirEast && d != DirWest) {
+		return false
+	} else if (c.Row() <= 1 || c.Row() >= 0x3E) && (d != DirNorth && d != DirSouth) {
+		return false
+	}
+	return true
+}
+
 func attemptTraversal(c MapCoord, allowDirFlags byte, d Direction, by int) (nc MapCoord, nd Direction, ok bool) {
 	if by == 0 {
 		nc, nd, ok = c, d, true
@@ -1414,6 +1449,11 @@ func attemptTraversal(c MapCoord, allowDirFlags byte, d Direction, by int) (nc M
 	}
 
 	if !canTraverseDir(allowDirFlags, d) {
+		nc, nd, ok = c, d, false
+		return
+	}
+
+	if !canEdgeTraverseDir(c, d) {
 		nc, nd, ok = c, d, false
 		return
 	}
@@ -1491,17 +1531,7 @@ func (r *RoomState) ProcessRoomTags() {
 }
 
 func (room *RoomState) RecalcAllowDirFlags() {
-	tilesOld := room.WRAMAfterLoaded[0x12000:0x14000]
-	tiles := room.WRAM[0x12000:0x14000]
-
-	for i := range room.AllowDirFlags {
-		// don't update AllowDirFlags if tiles haven't changed:
-		if tilesOld[i] == tiles[i] {
-			continue
-		}
-
-		room.AllowDirFlags[i] = tileAllowableDirFlags(tiles[i])
-	}
+	room.preprocessRoom()
 }
 
 func (room *RoomState) CalcTilesHash() (tilesHash uint64) {

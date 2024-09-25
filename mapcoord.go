@@ -40,15 +40,8 @@ func (t MapCoord) MoveBy(dir Direction, increment int) (MapCoord, Direction, boo
 
 	// don't allow perpendicular movement along the outer edge
 	// this prevents accidental/leaky flood fill along the edges
-	if row == 0 || row == 0x3F {
-		if dir != DirNorth && dir != DirSouth {
-			return t, dir, false
-		}
-	}
-	if col == 0 || col == 0x3F {
-		if dir != DirWest && dir != DirEast {
-			return t, dir, false
-		}
+	if !canEdgeTraverseDir(t, dir) {
+		return t, dir, false
 	}
 
 	switch dir {
