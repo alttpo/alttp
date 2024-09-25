@@ -563,7 +563,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	tiles := wram[0x12000:0x14000]
 
 	pushJob := func(neighborSt Supertile, se SE) {
-		q.SubmitJob(
+		q.SubmitTask(
 			&ReachTask{
 				InitialEmulator: t.InitialEmulator,
 				EntranceWRAM:    t.EntranceWRAM,

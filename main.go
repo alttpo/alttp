@@ -506,7 +506,7 @@ func main() {
 		if nWorkers <= 0 {
 			nWorkers = runtime.NumCPU()
 		}
-		q := taskqueue.NewQ(nWorkers, 0x2000, ReachTaskFromEntranceWorker)
+		q := taskqueue.NewQ[*ReachTask](nWorkers, 0x2000)
 
 		// eIDmin, eIDmax := uint8(0), uint8(0x84)
 		for eID := entranceMin; eID <= entranceMax; eID++ {
@@ -515,12 +515,15 @@ func main() {
 				continue
 			}
 
-			q.SubmitItem(&ReachTask{
-				EntranceID:      eID,
-				InitialEmulator: &e,
-				Rooms:           roomsMap,
-				RoomsLock:       &roomsLock,
-			})
+			q.SubmitTask(
+				&ReachTask{
+					EntranceID:      eID,
+					InitialEmulator: &e,
+					Rooms:           roomsMap,
+					RoomsLock:       &roomsLock,
+				},
+				ReachTaskFromEntranceWorker,
+			)
 		}
 		fmt.Println("wait")
 		q.Wait()
