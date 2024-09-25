@@ -79,11 +79,10 @@ func ReachTaskInterRoom(q Q, t T) {
 		write16(wram, 0xA0, uint16(st))
 		write16(wram, 0x048E, uint16(st))
 
-		//e.LoggerCPU = e.Logger
+		fmt.Printf("$%03X: load\n", uint16(st))
 		if err = e.ExecAt(loadSupertilePC, donePC); err != nil {
 			panic(err)
 		}
-		//e.LoggerCPU = nil
 
 		room = createRoom(t, e)
 		t.Rooms[uint16(t.Supertile)] = room
@@ -109,9 +108,11 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 	e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = t.EntranceID
 
 	// load the entrance:
+	// e.LoggerCPU = os.Stdout
 	if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
 		panic(err)
 	}
+	// e.LoggerCPU = nil
 
 	wram := (e.WRAM)[:]
 

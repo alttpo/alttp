@@ -3,8 +3,9 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/alttpo/snes/emulator/cpualt"
 	"io"
+
+	"github.com/alttpo/snes/emulator/cpualt"
 )
 
 type WRAMArray = [0x20000]byte
@@ -361,8 +362,13 @@ func (s *System) Exec(donePC uint32) (err error) {
 	var expectedPC uint32
 	var cycles uint64
 
-	if stopPC, expectedPC, cycles = s.RunUntil(donePC, 0x1000_0000); stopPC != expectedPC {
+	if stopPC, expectedPC, cycles = s.RunUntil(donePC, 0x2000_0000); stopPC != expectedPC {
 		err = fmt.Errorf("CPU ran too long and did not reach PC=%#06x; actual=%#06x; took %d cycles", expectedPC, stopPC, cycles)
+		return
+	}
+
+	if s.CPU.SP != 0x01FF {
+		err = fmt.Errorf("CPU stack overrun! SP=%04X", s.CPU.SP)
 		return
 	}
 

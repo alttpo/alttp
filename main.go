@@ -108,7 +108,7 @@ type romPointers struct {
 	Underworld_HandleRoomTags uint32 // 0x01_C2FD
 
 	Patch_JSR_Underworld_LoadSongBankIfNeeded uint32 // 0x02_8293
-	Underworld_LoadSongBankIfNeeded           uint32 // 0x02_82BC
+	Patch_SEP_20_RTL                          uint32 // 0x02_82BC ; SEP #$20; RTL
 
 	Patch_RebuildHUD_Keys uint32 // 0x0D_FA88 patch to RTL
 
@@ -398,55 +398,14 @@ func main() {
 			fastRomBank = 0
 		}
 
-		// JP 1.0:
-		alttp = romPointers{
-			Module_MainRouting: 0x00_80B5,
-
-			Underworld_LoadRoom:                         0x01_873A,
-			Underworld_LoadCustomTileAttributes:         0x0F_FD65,
-			Underworld_LoadAttributeTable:               0x01_B8BF,
-			Underworld_LoadEntrance_DoPotsBlocksTorches: 0x02_D854,
-
-			Module06_UnderworldLoad_after_JSR_Underworld_LoadEntrance: 0x02_8157,
-
-			LoadDefaultTileTypes: 0x0F_FD2A,
-
-			Intro_InitializeDefaultGFX: 0x0C_C208,
-			Intro_InitializeDefaultGFX_after_JSL_DecompressAnimatedUnderworldTiles: 0x0C_C237,
-
-			Intro_CreateTextPointers:      0x02_8022,
-			DecompressFontGFX:             0x0E_F572,
-			LoadItemGFXIntoWRAM4BPPBuffer: 0x00_D271,
-
-			InitializeSaveFile: 0x0C_DB3E,
-			CopySaveToWRAM:     0x0C_CEB2,
-
-			Ancilla_TerminateSelectInteractives: 0x09_AC57,
-
-			NMI_PrepareSprites: 0x00_85FC,
-			NMI_DoUpdates:      0x00_89E0,
-			NMI_ReadJoypads:    0x00_83D1,
-			ClearOAMBuffer:     0x00_841E,
-
-			Underworld_HandleRoomTags: 0x01_C2FD,
-
-			Patch_JSR_Underworld_LoadSongBankIfNeeded: 0x02_8293,
-			Underworld_LoadSongBankIfNeeded:           0x02_82BC,
-
-			Patch_RebuildHUD_Keys: 0x0D_FA88,
-
-			Patch_Sprite_PrepOAMCoord: 0x06_E48B,
-
-			Patch_LoadSongBank: 0x00_8888,
-
-			RoomData_PotItems_Pointers: 0x01_DB67,
-
-			SpriteHitBox_OffsetXLow:  0x06_F735,
-			SpriteHitBox_OffsetXHigh: 0x06_F755,
-			SpriteHitBox_Width:       0x06_F775,
-			SpriteHitBox_OffsetYLow:  0x06_F795,
-			SpriteHitBox_OffsetYHigh: 0x06_F7B5,
-			SpriteHitBox_Height:      0x06_F7D5,
+		if h.DestinationCode == snes.RegionJapan {
+			// JP 1.0:
+			alttp = alttpJP10
+			fmt.Printf("Detected JP ROM\n")
+		} else if h.DestinationCode == snes.RegionNorthAmerica {
+			// US:
+			alttp = alttpUS
+			fmt.Printf("Detected US ROM\n")
 		}
 	}
 
@@ -1432,7 +1391,7 @@ func setupAlttp(e *System) {
 		a.PHA()
 		a.PLB()
 		a.Comment("in Underworld_LoadEntrance_DoPotsBlocksTorches at PHB and bank switch to $7e")
-		a.JSR_abs(0xD854)
+		a.JSR_abs(uint16(alttp.Underworld_LoadEntrance_DoPotsBlocksTorches & 0xFFFF))
 		a.Comment("Module06_UnderworldLoad after JSR Underworld_LoadEntrance")
 		a.JMP_abs_imm16_w(uint16(alttp.Module06_UnderworldLoad_after_JSR_Underworld_LoadEntrance & 0xFFFF))
 		a.Comment("implied RTL")
@@ -1471,8 +1430,10 @@ func setupAlttp(e *System) {
 
 		a.Comment("Intro_CreateTextPointers#_028022")
 		a.JSL(fastRomBank | alttp.Intro_CreateTextPointers)
-		a.Comment("DecompressFontGFX#_0EF572")
-		a.JSL(fastRomBank | alttp.DecompressFontGFX)
+		if alttp.DecompressFontGFX != 0 {
+			a.Comment("DecompressFontGFX#_0EF572")
+			a.JSL(fastRomBank | alttp.DecompressFontGFX)
+		}
 		a.Comment("LoadItemGFXIntoWRAM4BPPBuffer#_00D271")
 		a.JSL(fastRomBank | alttp.LoadItemGFXIntoWRAM4BPPBuffer)
 
@@ -1733,7 +1694,7 @@ func setupAlttp(e *System) {
 		a = newEmitterAt(e, fastRomBank|alttp.Patch_JSR_Underworld_LoadSongBankIfNeeded, true)
 		// TODO: verify content before patching
 		//#_028293: JSR Underworld_LoadSongBankIfNeeded
-		a.JMP_abs_imm16_w(uint16(alttp.Underworld_LoadSongBankIfNeeded & 0xFFFF))
+		a.JMP_abs_imm16_w(uint16(alttp.Patch_SEP_20_RTL & 0xFFFF))
 		//.exit
 		//#_0282BC: SEP #$20
 		//#_0282BE: RTL
@@ -1755,6 +1716,7 @@ func setupAlttp(e *System) {
 		// Sprite_PrepOAMCoord_disable#_06E48B: INC.w $0F00,X  (INC,X = $FE)
 		// to                                   STZ.w $0F00,X  (STZ,X = $9E)
 		a = newEmitterAt(e, fastRomBank|alttp.Patch_Sprite_PrepOAMCoord, true)
+		// TODO: verify content before patching
 		a.STZ_abs_x(0x0F00)
 		a.WriteTextTo(e.Logger)
 	}
