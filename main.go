@@ -506,7 +506,7 @@ func main() {
 		if nWorkers <= 0 {
 			nWorkers = runtime.NumCPU()
 		}
-		q := taskqueue.NewQ(nWorkers, 0x1000, ReachTaskFromEntranceWorker)
+		q := taskqueue.NewQ(nWorkers, 0x2000, ReachTaskFromEntranceWorker)
 
 		// eIDmin, eIDmax := uint8(0), uint8(0x84)
 		for eID := entranceMin; eID <= entranceMax; eID++ {

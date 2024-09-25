@@ -1,6 +1,10 @@
 package taskqueue
 
-import "sync"
+import (
+	"fmt"
+	"runtime/debug"
+	"sync"
+)
 
 type WorkerFunc[T any] func(*Q[T], T)
 
@@ -40,7 +44,13 @@ func NewQ[T any](workerCount int, chanSize int, worker WorkerFunc[T]) (q *Q[T]) 
 }
 
 func (q *Q[T]) runJob(i I[T]) {
-	defer q.wg.Done()
+	defer func() {
+		if ex := recover(); ex != nil {
+			fmt.Printf("taskqueue: RECOVER: %v\n%s\n", ex, string(debug.Stack()))
+		}
+		q.wg.Done()
+	}()
+
 	i.job(q, i.item)
 }
 

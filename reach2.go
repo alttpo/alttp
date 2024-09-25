@@ -6,7 +6,9 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
+	"os"
 	"roomloader/taskqueue"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -80,14 +82,36 @@ func ReachTaskInterRoom(q Q, t T) {
 		write16(wram, 0x048E, uint16(st))
 
 		fmt.Printf("$%03X: load\n", uint16(st))
-		if err = e.ExecAt(loadSupertilePC, donePC); err != nil {
-			panic(err)
-		}
+		func() {
+			defer func() {
+				if ex := recover(); ex != nil {
+					fmt.Printf("ERROR: %v\n%s", ex, string(debug.Stack()))
+					room = &RoomState{
+						Supertile: st,
+						Entrance:  &Entrance{EntranceID: t.EntranceID, Supertile: t.Supertile, EntryCoord: 0},
+						IsLoaded:  false,
+						e:         e,
+					}
+				}
+			}()
 
-		room = createRoom(t, e)
+			// if uint16(st) == 0xA7 {
+			// 	e.LoggerCPU = os.Stdout
+			// }
+			if err = e.ExecAt(loadSupertilePC, donePC); err != nil {
+				panic(err)
+			}
+			// e.LoggerCPU = nil
+
+			room = createRoom(t, e)
+		}()
 		t.Rooms[uint16(t.Supertile)] = room
 	}
 	t.RoomsLock.Unlock()
+
+	if !room.IsLoaded {
+		return
+	}
 
 	reachTaskFloodfill(q, t, room)
 
@@ -191,7 +215,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 			// Supertiles:     map[Supertile]*RoomState{},
 			// SupertilesLock: sync.Mutex{},
 		},
-		IsLoaded:         false,
+		IsLoaded:         true,
 		Rendered:         nil,
 		GIF:              gif.GIF{},
 		Animated:         gif.GIF{},
@@ -256,7 +280,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 		MapCoord(read8(wram, uint32(0x0640))&2) << 11,
 	}
 
-	// os.WriteFile(fmt.Sprintf("r%03X.pre.tmap", uint16(t.Supertile)), tiles, 0644)
+	os.WriteFile(fmt.Sprintf("r%03X.pre.tmap", uint16(t.Supertile)), tiles, 0644)
 
 	// open up "locked" cell doors:
 	for i := uint32(0); i < 6; i++ {
