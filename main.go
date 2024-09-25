@@ -138,6 +138,7 @@ func main() {
 
 	nWorkers := -1
 	entranceStr := ""
+	entranceBadListStr := ""
 	entranceMinStr, entranceMaxStr := "", ""
 	oopsAllStr, excludeSpritesStr := "", ""
 	roomListStr := ""
@@ -163,6 +164,7 @@ func main() {
 	flag.IntVar(&enemyMovementFrames, "movementframes", 0, "render N frames in animated GIF of enemy movement after room load")
 	flag.StringVar(&roomListStr, "rooms", "", "list of room numbers (hex), comma delimited, ranges with x..y permitted")
 	flag.StringVar(&entranceStr, "ent", "", "single entrance ID (hex)")
+	flag.StringVar(&entranceBadListStr, "entsbad", "", "bad entrance IDs to exclude (hex, comma-delimited)")
 	flag.StringVar(&entranceMinStr, "entmin", "0", "entrance ID range minimum (hex)")
 	flag.StringVar(&entranceMaxStr, "entmax", "84", "entrance ID range maximum (hex)")
 	flag.BoolVar(&staticEntranceMap, "static", false, "use static entrance->supertile map from JP 1.0")
@@ -478,6 +480,21 @@ func main() {
 		}
 	}
 
+	// exclude entrance IDs:
+	excludeEntrances := map[uint8]bool{}
+	if entranceBadListStr != "" {
+		strs := strings.Split(entranceBadListStr, ",")
+		list := make([]string, 0, 10)
+		for _, s := range strs {
+			// parse hex values:
+			if id, err := strconv.ParseInt(s, 16, 64); err == nil {
+				excludeEntrances[uint8(id)] = true
+				list = append(list, strconv.FormatInt(id, 16))
+			}
+		}
+		fmt.Printf("excluding entrance ids: [%s]", strings.Join(list, ","))
+	}
+
 	// validate entrance range:
 	if entranceMax < entranceMin {
 		entranceMin, entranceMax = entranceMax, entranceMin
@@ -488,14 +505,6 @@ func main() {
 	}
 	if entranceMax > entranceCount-1 {
 		entranceMax = entranceCount - 1
-	}
-
-	// new simplified reachability:
-	if false {
-		err = reachabilityAnalysis(&e)
-		if err != nil {
-			panic(err)
-		}
 	}
 
 	// run jobs starting from entrances:
@@ -510,8 +519,14 @@ func main() {
 
 		// eIDmin, eIDmax := uint8(0), uint8(0x84)
 		for eID := entranceMin; eID <= entranceMax; eID++ {
-			// skip attract mode cinematic entrances:
+			if excludeEntrances[eID] {
+				fmt.Printf("entrance $%02X skip\n", eID)
+				continue
+			}
+
+			// skip attract mode cinematic entrances (vanilla only??):
 			if eID >= 0x73 && eID <= 0x75 {
+				fmt.Printf("entrance $%02X skip (assuming only used for intro/attract sequence)\n", eID)
 				continue
 			}
 
@@ -648,6 +663,14 @@ func main() {
 			wg.Wait()
 		}
 		return
+	}
+
+	// new simplified reachability:
+	if false {
+		err = reachabilityAnalysis(&e)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	// overworld screens:
