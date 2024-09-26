@@ -602,9 +602,10 @@ type RoomState struct {
 	WarpExitLayer    MapCoord
 	StairTargetLayer [4]MapCoord
 
-	Doors      []Door
-	Stairs     []MapCoord
-	SwapLayers map[MapCoord]empty // $06C0[size=$044E >> 1]
+	Doors        []Door
+	EdgeDoorTile map[MapCoord]*Door
+	Stairs       []MapCoord
+	SwapLayers   map[MapCoord]empty // $06C0[size=$044E >> 1]
 
 	TilesVisited map[MapCoord]empty
 

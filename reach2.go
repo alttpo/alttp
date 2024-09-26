@@ -168,7 +168,9 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 
 	reachTaskFloodfill(q, t, room)
 
-	room.RenderToNonPaletted()
+	if room.Rendered == nil {
+		room.RenderToNonPaletted()
+	}
 
 	// outline Link's starting position with entranceID
 	drawOutlineBox(
@@ -229,9 +231,10 @@ func createRoom(t T, e *System) (room *RoomState) {
 		StairExitTo:      [4]Supertile{},
 		WarpExitLayer:    0,
 		StairTargetLayer: [4]MapCoord{},
-		Doors:            []Door{},
+		Doors:            make([]Door, 0, 16),
+		EdgeDoorTile:     make(map[MapCoord]*Door, 0x2000),
 		Stairs:           []MapCoord{},
-		SwapLayers:       make(map[MapCoord]struct{}, 0x2000),
+		SwapLayers:       make(map[MapCoord]struct{}, 16*4),
 		TilesVisitedHash: make(map[uint64]map[MapCoord]struct{}),
 		Tiles:            [8192]byte{},
 		Reachable:        [8192]byte{},
@@ -281,6 +284,60 @@ func createRoom(t T, e *System) (room *RoomState) {
 		room.Reachable[i] = 0x01
 	}
 
+	// find doors:
+	for m := uint32(0); m < 32; m += 2 {
+		tpos := read16(wram, 0x19A0+m)
+		// skip marker:
+		if tpos == 0 {
+			continue
+		}
+
+		door := Door{
+			Pos:  MapCoord(tpos >> 1),
+			Type: DoorType(read16(wram, 0x1980+m)),
+			Dir:  Direction(read16(wram, 0x19C0+m)),
+		}
+		room.Doors = append(room.Doors, door)
+
+		fmt.Printf("$%03X: door[%1X] type=%s dir=%s pos=%s\n", uint16(room.Supertile), m>>1, door.Type, door.Dir, door.Pos)
+	}
+
+	// find layer-swap tiles in doorways:
+	swapCount := uint32(read16(wram, 0x044E))
+	for m := uint32(0); m < swapCount; m += 2 {
+		// layer swaps are stored as doors in ROM as type=0x16. when the room is drawn those
+		// special markers are extracted and stuck into the [16]uint16 array at 0x06C0 as
+		// tilemap positions.
+		lsc := MapCoord(read16(wram, 0x06C0+m))
+		fmt.Printf("$%03X: layer swap at %04X\n", uint16(room.Supertile), uint16(lsc))
+
+		// mark the 2x2 tile as a layer-swap:
+		room.SwapLayers[lsc+0x00] = empty{}
+		room.SwapLayers[lsc+0x01] = empty{}
+		room.SwapLayers[lsc+0x40] = empty{}
+		room.SwapLayers[lsc+0x41] = empty{}
+
+		// put it on the opposite layer as well:
+		room.SwapLayers[lsc^0x1000+0x00] = empty{}
+		room.SwapLayers[lsc^0x1000+0x01] = empty{}
+		room.SwapLayers[lsc^0x1000+0x40] = empty{}
+		room.SwapLayers[lsc^0x1000+0x41] = empty{}
+	}
+
+	// find exit doors (from cave/dungeon):
+	exitCount := uint32(read16(wram, 0x19E0))
+	for m := uint32(0); m < exitCount; m += 2 {
+		c := MapCoord(read16(wram, 0x19E2+m) >> 1)
+		fmt.Printf("$%03X: exit door at %04X\n", uint16(room.Supertile), uint16(c))
+
+		for i := range room.Doors {
+			if room.Doors[i].Pos&0x0FFF == c {
+				room.Doors[i].IsExit = true
+				break
+			}
+		}
+	}
+
 	room.preprocessRoom()
 
 	copy(room.WRAMAfterLoaded[:], (*e.WRAM)[:])
@@ -288,8 +345,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 	// persist the current TilesVisited map in its hash(tiles) slot:
 	room.SwapTilesVisitedMap()
 
-	// os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
-	// os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
+	os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
+	os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
 
 	return
 }
@@ -337,20 +394,9 @@ func (room *RoomState) preprocessRoom() {
 	}
 
 	// open up doorways:
-	room.Doors = make([]Door, 0, 16)
-	for m := 0; m < 16; m++ {
-		tpos := read16(wram, uint32(0x19A0+(m<<1)))
-		// stop marker:
-		if tpos == 0 {
-			break
-		}
-
-		door := Door{
-			Pos:  MapCoord(tpos >> 1),
-			Type: DoorType(read16(wram, uint32(0x1980+(m<<1)))),
-			Dir:  Direction(read16(wram, uint32(0x19C0+(m<<1)))),
-		}
-		room.Doors = append(room.Doors, door)
+	for j := range room.Doors {
+		door := &room.Doors[j]
+		// fmt.Printf("$%03X: door[%1X] type=%s dir=%s pos=%s\n", uint16(room.Supertile), j, door.Type, door.Dir, door.Pos)
 
 		if door.Type == 0x30 {
 			// exploding wall:
@@ -382,6 +428,7 @@ func (room *RoomState) preprocessRoom() {
 			secondTileOffs = 0x01
 		case DirEast:
 			c, _, _ = door.Pos.MoveBy(DirSouth, 1)
+			c, _, _ = c.MoveBy(DirEast, 1)
 			secondTileOffs = 0x40
 		case DirWest:
 			c, _, _ = door.Pos.MoveBy(DirSouth, 1)
@@ -431,7 +478,7 @@ func (room *RoomState) preprocessRoom() {
 			}
 		}
 
-		fmt.Printf("$%03X: door type=%s dir=%s pos=%s: %s\n", uint16(room.Supertile), door.Type, door.Dir, door.Pos, dbg.String())
+		//fmt.Printf("$%03X: door type=%s dir=%s pos=%s: %s\n", uint16(room.Supertile), door.Type, door.Dir, door.Pos, dbg.String())
 
 		c, ok = doorwayC, true
 
@@ -446,6 +493,12 @@ func (room *RoomState) preprocessRoom() {
 		for i := 0; ok && i < count; i++ {
 			room.AllowDirFlags[c] = allowDirFlags
 			room.AllowDirFlags[c+secondTileOffs] = allowDirFlags
+			if isEdge, _, _, _ := c.IsDoorEdge(); isEdge {
+				if door.Type.IsEdgeDoorwayToNeighbor() && !door.IsExit {
+					room.EdgeDoorTile[c] = door
+					room.EdgeDoorTile[c+secondTileOffs] = door
+				}
+			}
 
 			// only replace tiles that are collision types:
 			if isTileCollision(tiles[c]) {
@@ -472,108 +525,6 @@ func (room *RoomState) preprocessRoom() {
 		room.AllowDirFlags[i+0x3E<<6] &= 0b0000_0011
 		room.AllowDirFlags[i+0x3F<<6] &= 0b0000_0011
 	}
-}
-
-func tileAllowableDirFlags(v uint8) uint8 {
-	// north/south doorways:
-	if v == 0x80 || v == 0x82 || v == 0x84 || v == 0x86 || v == 0x8E || v == 0x8F || v == 0xA0 ||
-		v == 0x5E || v == 0x5F || v&0xF8 == 0x30 || v == 0x38 || v == 0x39 || v == 0x28 || v == 0x29 {
-		return 0b0000_0011
-	}
-	// east/west doorways:
-	if v == 0x81 || v == 0x83 || v == 0x85 || v == 0x87 || v == 0x89 || v == 0x2A || v == 0x2B {
-		return 0b0000_1100
-	}
-
-	// somaria:
-	if v == 0xB0 {
-		return 0b0000_1100
-	} else if v == 0xB1 {
-		return 0b0000_0011
-	} else if v == 0xB2 {
-		return 0b0000_1010
-	} else if v == 0xB3 {
-		return 0b0000_1001
-	} else if v == 0xB4 {
-		return 0b0000_0110
-	} else if v == 0xB5 {
-		return 0b0000_0101
-	} else if v == 0xB6 {
-		return 0b0000_1111
-	} else if v == 0xB7 {
-		return 0b0000_1110
-	} else if v == 0xB8 {
-		return 0b0000_1101
-	} else if v == 0xB9 {
-		return 0b0000_1011
-	} else if v == 0xBA {
-		return 0b0000_0111
-	} else if v == 0xBB {
-		return 0b0000_1111
-	} else if v == 0xBC {
-		return 0b0000_1111
-	} else if v == 0xBD {
-		return 0b0000_1111
-	} else if v == 0xBE {
-		return 0b0000_1111
-	}
-
-	// collision prevents traversal:
-	if isTileCollision(v) {
-		return 0
-	}
-
-	// otherwise allow all 4 directions:
-	return 0b0000_1111
-}
-
-func isTileCollision(v uint8) bool {
-	// entrance doors:
-	if v == 0x8E || v == 0x8F {
-		return false
-	}
-	// spiral staircases:
-	if v == 0x5E || v == 0x5F {
-		return false
-	}
-
-	// moving floor:
-	if v == 0x1C || v == 0x0C {
-		return false
-	}
-
-	isWalkable := v == 0x00 || // no collision
-		v == 0x09 || // shallow water
-		v == 0x22 || // manual stairs
-		v == 0x23 || v == 0x24 || // floor switches
-		(v >= 0x0D && v <= 0x0F) || // spikes / floor ice
-		v == 0x3A || v == 0x3B || // star tiles
-		v == 0x40 || // thick grass
-		v == 0x4B || // warp
-		v == 0x60 || // rupee tile
-		(v >= 0x68 && v <= 0x6B) || // conveyors
-		v == 0xA0 // north/south dungeon swap door (for HC to sewers)
-
-	if isWalkable {
-		return false
-	}
-
-	vClass := v & 0xF0
-
-	isMaybeWalkable := vClass == 0x70 || // pots/pegs/blocks
-		v == 0x62 || // bombable floor
-		v == 0x66 || v == 0x67 // crystal pegs (orange/blue):
-
-	if isMaybeWalkable {
-		return false
-	}
-
-	if vClass == 0x30 || vClass == 0x80 || vClass == 0x90 ||
-		vClass == 0xA0 || vClass == 0xF0 {
-		return false
-	}
-
-	return true
 }
 
 func reachTaskFloodfill(q Q, t T, room *RoomState) {
@@ -678,6 +629,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 		lifo = append(lifo, startState)
 
 		// iteratively recurse over processing stack:
+	stateloop:
 		for len(lifo) > 0 {
 			se := lifo[len(lifo)-1]
 			lifo = lifo[0 : len(lifo)-1]
@@ -843,62 +795,80 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				continue
 			}
 
+			// are we in an edge doorway to a neighboring room?
+			if door, isDoorTile := room.EdgeDoorTile[c]; isDoorTile {
+				canTurn = false
+				if traverseDir == door.Dir {
+					ok := true
+					for i := 0; ok && i < 16; i++ {
+						door, isDoorTile := room.EdgeDoorTile[c]
+						if !isDoorTile {
+							break
+						}
+
+						fmt.Printf("$%03X: edge doorway %04X %s uses door=%04X type=%02X dir=%s\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(door.Pos), uint8(door.Type), door.Dir)
+						room.Reachable[c] = v
+						room.TilesVisited[c] = empty{}
+
+						// only do layer swapping when traversing the same direction as the door:
+						/*if traverseDir == door.Dir*/
+						{
+							if _, doSwap := room.SwapLayers[c]; doSwap {
+								// swap layers:
+								fmt.Printf("$%03X: edge doorway %04X do layer swap\n", uint16(t.Supertile), uint16(c))
+								layerSwap = 0x1000
+							}
+						}
+
+						if isEdge, edgeDir, _, _ := c.IsEdge(); isEdge {
+							if traverseDir == edgeDir && room.CanTraverseDir(c, traverseDir) {
+								var neighborSt Supertile
+								var ok bool
+								if door.Type == 0x46 {
+									neighborSt, ok = room.StairExitTo[traverseDir], true
+								} else {
+									neighborSt, _, ok = st.MoveBy(traverseDir)
+								}
+								if ok {
+									ct := c.OppositeEdge() ^ layerSwap
+									fmt.Printf("$%03X: edge doorway %04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
+									pushJob(
+										neighborSt,
+										SE{
+											c: ct,
+											d: traverseDir,
+											s: se.s,
+										})
+									continue stateloop
+								}
+							}
+						}
+
+						c, _, ok = c.MoveBy(traverseDir, 1)
+					}
+					fmt.Printf("HUH!?\n")
+				} else if traverseDir == door.Dir.Opposite() {
+					// entering the doorway into the room from the edge:
+					ok := true
+					for i := 0; ok && i < 16; i++ {
+						door, isDoorTile := room.EdgeDoorTile[c]
+						if !isDoorTile {
+							break
+						}
+
+						fmt.Printf("$%03X: edge doorway %04X %s uses door=%04X type=%02X dir=%s\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(door.Pos), uint8(door.Type), door.Dir)
+						room.Reachable[c] = v
+						room.TilesVisited[c] = empty{}
+
+						c, _, ok = c.MoveBy(traverseDir, 1)
+					}
+				}
+			}
+
 			if v >= 0x80 && v <= 0x8D {
 				// traveling through a doorway:
-				// TODO: special case for 0x89 transport door
-				initialV := v
 				canTraverse = true
 				canTurn = false
-				// don't advance beyond the end of the doorway:
-				traverseBy = 0
-
-				fmt.Printf("$%03X: doorway $%04X %s\n", uint16(t.Supertile), uint16(c), se.d)
-
-				// try to find a layer-swap tile in the doorway:
-				ok := true
-				for i := 0; ok && i < 16; i++ {
-					v = tiles[c]
-					if v&0xF0 == 0x90 || v&0xF8 == 0xA8 {
-						// only swap layers if we're traversing the doorway initially, there may be a layer swap on the opposite side:
-						if se.s == reachStateWalk {
-							layerSwap = 0x1000
-							se.s = reachStateDoorway
-						}
-					} else if v != initialV {
-						// stop when we're out of the doorway tiles
-						fmt.Printf("$%03X: doorway stop $%04X %s\n", uint16(t.Supertile), uint16(c), se.d)
-						se.s = reachStateWalk
-						break
-					}
-
-					room.Reachable[c] = v
-					room.TilesVisited[c] = empty{}
-
-					// or stop if we hit the edge:
-					c, _, ok = c.MoveBy(se.d, 1)
-				}
-
-				if ok, _, _, _ = c.IsEdge(); ok {
-					// hit the edge:
-					if initialV == 0x89 {
-						// east/west transport door needs a special exit supertile, not its neighbor
-						neighborSt := room.StairExitTo[traverseDir]
-						fmt.Printf("$%03X: edge $%04X %s teleport exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
-						pushJob(
-							neighborSt,
-							SE{
-								c: c.OppositeEdge() ^ layerSwap,
-								d: traverseDir,
-								s: se.s,
-							})
-						continue
-					}
-				} else {
-					// if we did not hit the edge then just do the layer swap if applicable:
-					c ^= layerSwap
-					layerSwap = 0
-					se.s = reachStateWalk
-				}
 			} else if v == 0x1D || v == 0x3D {
 				// north or south single-layer auto-stairs:
 				initialV := v
@@ -962,6 +932,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				}
 
 				if stairKind == 0 {
+					// just a regular door, no stairs:
 					canTraverse = true
 					canTurn = false
 				} else {
@@ -1123,7 +1094,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					canTurn = true
 				} else {
 					// transition from layer 1 to layer 2:
-					fmt.Printf("$%03X: fall $%04X\n", uint16(t.Supertile), uint16(c))
+					fmt.Printf("$%03X: fall to layer 2 at $%04X\n", uint16(t.Supertile), uint16(c))
 					lifo = append(lifo, SE{c: c | 0x1000, d: traverseDir, s: se.s})
 				}
 			} else if v == 0x20 || v == 0x62 {
@@ -1163,7 +1134,8 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				canTraverse = true
 
 				// check for water below us:
-				{
+				// TODO: fix me for Swamp Palace
+				if false {
 					ct := c | 0x1000
 					if ct != c && tiles[ct] == 0x08 {
 						// if v != 0x08 && v != 0x0D {
@@ -1395,11 +1367,12 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			if ok, edgeDir, _, _ := c.IsEdge(); ok {
 				if traverseDir == edgeDir && room.CanTraverseDir(c, traverseDir) {
 					if neighborSt, _, ok := st.MoveBy(traverseDir); ok {
-						fmt.Printf("$%03X: edge $%04X %s exit to $%03X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt))
+						ct := c.OppositeEdge() ^ layerSwap
+						fmt.Printf("$%03X: edge $%04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
 						pushJob(
 							neighborSt,
 							SE{
-								c: c.OppositeEdge() ^ layerSwap,
+								c: ct,
 								d: traverseDir,
 								s: se.s,
 							})
@@ -1480,6 +1453,108 @@ func (room *RoomState) AttemptTraversal(c MapCoord, d Direction, by int) (nc Map
 
 	nc, nd, ok = c.MoveBy(d, by)
 	return
+}
+
+func tileAllowableDirFlags(v uint8) uint8 {
+	// north/south doorways:
+	if v == 0x80 || v == 0x82 || v == 0x84 || v == 0x86 || v == 0x8E || v == 0x8F || v == 0xA0 ||
+		v == 0x5E || v == 0x5F || v&0xF8 == 0x30 || v == 0x38 || v == 0x39 || v == 0x28 || v == 0x29 {
+		return 0b0000_0011
+	}
+	// east/west doorways:
+	if v == 0x81 || v == 0x83 || v == 0x85 || v == 0x87 || v == 0x89 || v == 0x2A || v == 0x2B {
+		return 0b0000_1100
+	}
+
+	// somaria:
+	if v == 0xB0 {
+		return 0b0000_1100
+	} else if v == 0xB1 {
+		return 0b0000_0011
+	} else if v == 0xB2 {
+		return 0b0000_1010
+	} else if v == 0xB3 {
+		return 0b0000_1001
+	} else if v == 0xB4 {
+		return 0b0000_0110
+	} else if v == 0xB5 {
+		return 0b0000_0101
+	} else if v == 0xB6 {
+		return 0b0000_1111
+	} else if v == 0xB7 {
+		return 0b0000_1110
+	} else if v == 0xB8 {
+		return 0b0000_1101
+	} else if v == 0xB9 {
+		return 0b0000_1011
+	} else if v == 0xBA {
+		return 0b0000_0111
+	} else if v == 0xBB {
+		return 0b0000_1111
+	} else if v == 0xBC {
+		return 0b0000_1111
+	} else if v == 0xBD {
+		return 0b0000_1111
+	} else if v == 0xBE {
+		return 0b0000_1111
+	}
+
+	// collision prevents traversal:
+	if isTileCollision(v) {
+		return 0
+	}
+
+	// otherwise allow all 4 directions:
+	return 0b0000_1111
+}
+
+func isTileCollision(v uint8) bool {
+	// entrance doors:
+	if v == 0x8E || v == 0x8F {
+		return false
+	}
+	// spiral staircases:
+	if v == 0x5E || v == 0x5F {
+		return false
+	}
+
+	// moving floor:
+	if v == 0x1C || v == 0x0C {
+		return false
+	}
+
+	isWalkable := v == 0x00 || // no collision
+		v == 0x09 || // shallow water
+		v == 0x22 || // manual stairs
+		v == 0x23 || v == 0x24 || // floor switches
+		(v >= 0x0D && v <= 0x0F) || // spikes / floor ice
+		v == 0x3A || v == 0x3B || // star tiles
+		v == 0x40 || // thick grass
+		v == 0x4B || // warp
+		v == 0x60 || // rupee tile
+		(v >= 0x68 && v <= 0x6B) || // conveyors
+		v == 0xA0 // north/south dungeon swap door (for HC to sewers)
+
+	if isWalkable {
+		return false
+	}
+
+	vClass := v & 0xF0
+
+	isMaybeWalkable := vClass == 0x70 || // pots/pegs/blocks
+		v == 0x62 || // bombable floor
+		v == 0x66 || v == 0x67 // crystal pegs (orange/blue):
+
+	if isMaybeWalkable {
+		return false
+	}
+
+	if vClass == 0x30 || vClass == 0x80 || vClass == 0x90 ||
+		vClass == 0xA0 || vClass == 0xF0 {
+		return false
+	}
+
+	return true
 }
 
 func (room *RoomState) PlaceLinkAt(c MapCoord) {
@@ -1585,7 +1660,7 @@ func (room *RoomState) renderToNonPaletted(g *image.NRGBA) {
 	for _, door := range room.Doors {
 		drawShadowedString(
 			g,
-			image.White,
+			image.NewUniform(color.RGBA{0, 0, 255, 255}),
 			fixed.Point26_6{X: fixed.I(int(door.Pos.Col()*8) + 8), Y: fixed.I(int(door.Pos.Row()*8) - 2)},
 			fmt.Sprintf("%02X", uint8(door.Type)),
 		)

@@ -127,19 +127,19 @@ func (t MapCoord) OnEdge(d Direction) MapCoord {
 
 func (t MapCoord) IsDoorEdge() (ok bool, dir Direction, row, col uint16) {
 	_, row, col = t.RowCol()
-	if row <= 0x08 {
+	if row <= 0x07 {
 		ok, dir = true, DirNorth
 		return
 	}
-	if row >= 0x3F-8 {
+	if row >= 0x40-8 {
 		ok, dir = true, DirSouth
 		return
 	}
-	if col <= 0x08 {
+	if col <= 0x07 {
 		ok, dir = true, DirWest
 		return
 	}
-	if col >= 0x3F-8 {
+	if col >= 0x40-8 {
 		ok, dir = true, DirEast
 		return
 	}
@@ -161,7 +161,6 @@ func (t MapCoord) OppositeDoorEdge() MapCoord {
 		return MapCoord(lyr | (row << 6) | 0x06)
 	}
 	panic("not at an edge")
-	return t
 }
 
 func (t MapCoord) FlipVertical() MapCoord {
