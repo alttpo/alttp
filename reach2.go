@@ -1163,19 +1163,6 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			} else if room.isAlwaysWalkable(v) || room.isMaybeWalkable(c, v) {
 				canTraverse = true
 
-				// check for water below us:
-				// TODO: fix me for Swamp Palace
-				if false {
-					ct := c | 0x1000
-					if ct != c && tiles[ct] == 0x08 {
-						// if v != 0x08 && v != 0x0D {
-						// 	r.pushAllDirections(t, StateSwim)
-						// }
-						// start swimming:
-						lifo = append(lifo, SE{c: ct, d: traverseDir, s: reachStateSwim})
-					}
-				}
-
 				// can we hookshot to something?
 				for d := DirNorth; d < DirNone; d++ {
 					canHook := false
