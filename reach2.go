@@ -114,10 +114,6 @@ func ReachTaskInterRoom(q Q, t T) {
 	}
 
 	reachTaskFloodfill(q, t, room)
-
-	if room.Rendered == nil {
-		room.RenderToNonPaletted()
-	}
 }
 
 func ReachTaskFromEntranceWorker(q Q, t T) {
@@ -168,10 +164,7 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 
 	reachTaskFloodfill(q, t, room)
 
-	if room.Rendered == nil {
-		room.RenderToNonPaletted()
-	}
-
+	room.Mutex.Lock()
 	// outline Link's starting position with entranceID
 	drawOutlineBox(
 		room.RenderedNRGBA,
@@ -187,6 +180,7 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 		fixed.Point26_6{X: fixed.I(int(t.SE.c.Col())*8 + 1), Y: fixed.I(int(t.SE.c.Row())*8 + 14)},
 		fmt.Sprintf("%02X", uint8(t.EntranceID)),
 	)
+	room.Mutex.Unlock()
 }
 
 func getOrCreateRoom(t T, e *System) (room *RoomState) {
@@ -1440,6 +1434,10 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				lifo = append(lifo, SE{c: c, d: d, s: se.s})
 			}
 		}
+	}
+
+	if room.Rendered == nil {
+		room.RenderToNonPaletted()
 	}
 }
 
