@@ -519,7 +519,7 @@ func main() {
 	}
 
 	// run jobs starting from entrances:
-	if true {
+	if false {
 		roomsMap := make(map[uint16]*RoomState, 0x128)
 		roomsLock := sync.Mutex{}
 
@@ -682,7 +682,7 @@ func main() {
 	}
 
 	// overworld screens:
-	if false {
+	if true {
 		func(initEmu *System) {
 			e := &System{
 				Logger:    nil,
@@ -728,15 +728,35 @@ func main() {
 			frameTrace := bytes.Buffer{}
 			f := 0
 
-			if false {
-				fmt.Println("module 05")
+			if true {
 				write8(e.WRAM[:], 0x10, 0x05)
 				write8(e.WRAM[:], 0x11, 0x00)
 				write8(e.WRAM[:], 0xB0, 0x00)
-				if err = e.ExecAt(runFramePC, donePC); err != nil {
-					panic(err)
+				fmt.Println("module 05")
+
+				fmt.Printf(
+					"frame: %02X %02X %02X\n",
+					read8(e.WRAM[:], 0x010),
+					read8(e.WRAM[:], 0x011),
+					read8(e.WRAM[:], 0x0B0),
+				)
+				for i := 0; i < 256; i++ {
+					if err = e.ExecAt(runFramePC, donePC); err != nil {
+						panic(err)
+					}
+					renderGifFrame()
+
+					fmt.Printf(
+						"frame: %02X %02X %02X\n",
+						read8(e.WRAM[:], 0x010),
+						read8(e.WRAM[:], 0x011),
+						read8(e.WRAM[:], 0x0B0),
+					)
+
+					if read8(e.WRAM[:], 0x011) == 0x00 {
+						break
+					}
 				}
-				renderGifFrame()
 			}
 
 			if false {
@@ -769,7 +789,7 @@ func main() {
 				return
 			}
 
-			if true {
+			if false {
 				// emulate until module=7,submodule=0:
 				fmt.Println("wait until module 7")
 				for {
@@ -786,7 +806,7 @@ func main() {
 			}
 
 			if true {
-				// now immediately exit sanctuary to go to overworld:
+				// hold DOWN to exit Link's House:
 				//                            BYsSudlr AXLRvvvv
 				e.HWIO.ControllerInput[0] = 0b00000100_00000000
 				// emulate until module=9,submodule=0:
@@ -798,28 +818,41 @@ func main() {
 					//	break
 					//}
 					if read8(wram, 0x10) == 0x9 && read8(wram, 0x11) == 0 {
-						frameTrace.WriteTo(os.Stdout)
+						// frameTrace.WriteTo(os.Stdout)
 						break
 					}
-					if f&63 == 63 {
-						RenderGIF(&a, "test.gif")
+					// if f&63 == 63 {
+					// 	RenderGIF(&a, "a-test.gif")
+					// }
+					if false {
+						frameTrace.Reset()
+						e.Logger = &frameTrace
+						e.LoggerCPU = &frameTrace
+						//e.LoggerCPU = os.Stdout
 					}
-					frameTrace.Reset()
-					e.Logger = &frameTrace
-					e.LoggerCPU = &frameTrace
-					//e.LoggerCPU = os.Stdout
 					if err = e.ExecAt(runFramePC, donePC); err != nil {
 						panic(err)
 					}
 					e.Logger = nil
 					e.LoggerCPU = nil
 					f++
-					fmt.Println(f)
+					fmt.Printf(
+						"f%04d: %02X %02X %02X\n",
+						f,
+						read8(e.WRAM[:], 0x010),
+						read8(e.WRAM[:], 0x011),
+						read8(e.WRAM[:], 0x0B0),
+					)
+					os.WriteFile(
+						fmt.Sprintf("f%04d.wram", f),
+						e.WRAM[0x2000:0x6000],
+						0644,
+					)
 					renderGifFrame()
 				}
 			}
 
-			if true {
+			if false {
 				fmt.Println("release DOWN for 300 frames")
 				e.HWIO.ControllerInput[0] = 0b00000000_00000000
 				for n := 0; n < 300; n++ {
@@ -843,9 +876,9 @@ func main() {
 			ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
 			renderSpriteLabels(g, e.WRAM[:], Supertile(read16(e.WRAM[:], 0xA0)))
 
-			_ = exportPNG("test.png", g)
+			exportPNG("a-test.png", g)
 
-			RenderGIF(&a, "test.gif")
+			RenderGIF(&a, "a-test.gif")
 		}(&e)
 		return
 	}
