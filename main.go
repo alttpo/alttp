@@ -725,7 +725,7 @@ func main() {
 				}
 			}
 
-			frameTrace := bytes.Buffer{}
+			// frameTrace := bytes.Buffer{}
 			f := 0
 
 			if true {
@@ -746,16 +746,30 @@ func main() {
 					}
 					renderGifFrame()
 
+					f++
 					fmt.Printf(
-						"frame: %02X %02X %02X\n",
+						"f%04d: %02X %02X %02X\n",
+						f,
 						read8(e.WRAM[:], 0x010),
 						read8(e.WRAM[:], 0x011),
 						read8(e.WRAM[:], 0x0B0),
 					)
 
+					// wait until submodule goes back to 0:
 					if read8(e.WRAM[:], 0x011) == 0x00 {
 						break
 					}
+				}
+			}
+
+			if true {
+				// load entrance for Hyrule Castle to get to a "large area":
+
+				// poke the entrance ID into our asm code:
+				e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x04
+
+				if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
+					panic(err)
 				}
 			}
 
@@ -806,7 +820,7 @@ func main() {
 			}
 
 			if true {
-				// hold DOWN to exit Link's House:
+				// hold DOWN to exit underworld out to overworld:
 				//                            BYsSudlr AXLRvvvv
 				e.HWIO.ControllerInput[0] = 0b00000100_00000000
 				// emulate until module=9,submodule=0:
@@ -824,17 +838,16 @@ func main() {
 					// if f&63 == 63 {
 					// 	RenderGIF(&a, "a-test.gif")
 					// }
-					if false {
-						frameTrace.Reset()
-						e.Logger = &frameTrace
-						e.LoggerCPU = &frameTrace
-						//e.LoggerCPU = os.Stdout
-					}
+					// frameTrace.Reset()
+					// e.Logger = &frameTrace
+					// e.LoggerCPU = &frameTrace
+					//e.LoggerCPU = os.Stdout
 					if err = e.ExecAt(runFramePC, donePC); err != nil {
 						panic(err)
 					}
-					e.Logger = nil
-					e.LoggerCPU = nil
+					// e.Logger = nil
+					// e.LoggerCPU = nil
+
 					f++
 					fmt.Printf(
 						"f%04d: %02X %02X %02X\n",
@@ -851,6 +864,31 @@ func main() {
 					renderGifFrame()
 				}
 			}
+
+			// decode map16 overworld from $7E2000 into what we're used to seeing for the underworld at $7F2000:
+			tiles := [0x80 * 0x80]byte{}
+			for row := uint32(0); row < 0x80; row += 2 {
+				for col := uint32(0); col < 0x80; col += 2 {
+					m16 := uint32(read16(e.WRAM[0x2000:], (row*0x40 + col)))
+					//   Map16Definitions: 0x0F_8000
+					df := [4]uint16{
+						e.Bus.Read16(0x0F_8000+(m16<<3)+0) & 0x01FF,
+						e.Bus.Read16(0x0F_8000+(m16<<3)+2) & 0x01FF,
+						e.Bus.Read16(0x0F_8000+(m16<<3)+4) & 0x01FF,
+						e.Bus.Read16(0x0F_8000+(m16<<3)+6) & 0x01FF,
+					}
+					// OverworldTileTypes: 0x0F_FD94
+					tiles[((row+0)*0x80)+(col+0)] = e.Bus.Read8(0x0F_FD94 + uint32(df[0]))
+					tiles[((row+0)*0x80)+(col+1)] = e.Bus.Read8(0x0F_FD94 + uint32(df[1]))
+					tiles[((row+1)*0x80)+(col+0)] = e.Bus.Read8(0x0F_FD94 + uint32(df[2]))
+					tiles[((row+1)*0x80)+(col+1)] = e.Bus.Read8(0x0F_FD94 + uint32(df[3]))
+				}
+			}
+			os.WriteFile(
+				"overworld.wram",
+				tiles[:],
+				0644,
+			)
 
 			if false {
 				fmt.Println("release DOWN for 300 frames")
