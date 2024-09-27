@@ -1101,15 +1101,17 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// a ladder into and out of the two pools that can be drained.
 
 				// traverse down the "stairs":
-				initialV := v
+				// initialV := v
 				ok := true
 				for i := 0; ok && i < 2; i++ {
 					v = tiles[c]
-					if v != initialV {
-						break
-					}
+					// if v != initialV {
+					// 	break
+					// }
 					room.Reachable[c] = v
 					room.TilesVisited[c] = empty{}
+
+					fmt.Printf("$%03X: water stairs at %04X %s\n", uint16(t.Supertile), uint16(c), se.d)
 					c, _, ok = c.MoveBy(se.d, 1)
 				}
 				if ok {
