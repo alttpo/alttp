@@ -1351,7 +1351,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			}
 
 			// can we bonk cross a pit from this bonkable tile?
-			if v == 0x27 || v&0xF0 == 0x70 {
+			if v == 0x27 || v == 0x66 || v == 0x67 || v&0xF0 == 0x70 {
 				for d := DirNorth; d < DirNone; d++ {
 					// need a place to bonk from:
 					canBonk := true

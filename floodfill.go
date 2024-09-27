@@ -1491,6 +1491,7 @@ func (r *RoomState) canHookThru(v uint8) bool {
 // isHookable determines if the tile can be attached to with a hookshot
 func (r *RoomState) isHookable(v uint8) bool {
 	return v == 0x27 || // general hookable object
+		v == 0x02 ||
 		(v >= 0x58 && v <= 0x5D) || // chests (TODO: check $0500 table for kind)
 		v&0xF0 == 0x70 // pot/peg/block
 }
