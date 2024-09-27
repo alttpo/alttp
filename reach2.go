@@ -871,6 +871,25 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				canTurn = false
 			} else if v == 0x1D || v == 0x3D {
 				// north or south single-layer auto-stairs:
+				if v == 0x3D && se.d == DirNorth {
+					// check for deep water to dive into:
+					if ct, _, ok := c.MoveBy(DirNorth, 3); ok {
+						ct ^= 0x1000
+						if tiles[ct] == 0x08 {
+							lifo = append(lifo, SE{c: ct, d: DirNorth, s: reachStateSwim})
+						}
+					}
+				} else if v == 0x1D && se.d == DirSouth {
+					// check for deep water to dive into:
+					if ct, _, ok := c.MoveBy(DirSouth, 3); ok {
+						ct ^= 0x1000
+						if tiles[ct] == 0x08 {
+							lifo = append(lifo, SE{c: ct, d: DirSouth, s: reachStateSwim})
+						}
+					}
+				}
+
+				// traverse down the stairs:
 				initialV := v
 				ok := true
 				for i := 0; ok && i < 2; i++ {
@@ -1084,9 +1103,24 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				}
 			} else if v == 0x08 {
 				// 08 - deep water
-				// room 76 has this on layer 1 in place of a normal stairwell into the pool
-				if ct, d, ok := c.MoveBy(traverseDir, 2); ok {
-					lifo = append(lifo, SE{c: ct, d: d, s: reachStateWalk})
+				// deep water on layer 1 is only seen in room $076 and is used as
+				// a ladder into and out of the two pools that can be drained.
+
+				// traverse down the "stairs":
+				initialV := v
+				ok := true
+				for i := 0; ok && i < 2; i++ {
+					v = tiles[c]
+					if v != initialV {
+						break
+					}
+					room.Reachable[c] = v
+					room.TilesVisited[c] = empty{}
+					c, _, ok = c.MoveBy(se.d, 1)
+				}
+				if ok {
+					canTraverse = true
+					canTurn = false
 				}
 			} else if v == 0x1C && !c.IsLayer2() {
 				if tiles[c|0x1000] == 0x0C {
@@ -1222,6 +1256,14 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 							}
 						}
 					}
+				}
+			}
+
+			if tiles[c|0x1000] == 0x0A {
+				// 0A - water ladder
+				if ct, d, ok := c.MoveBy(traverseDir, 1); ok {
+					// jump into swimming:
+					lifo = append(lifo, SE{c: ct | 0x1000, d: d, s: reachStateSwim})
 				}
 			}
 
