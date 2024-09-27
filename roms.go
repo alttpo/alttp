@@ -28,6 +28,7 @@ var alttpJP10 = romPointers{
 	Patch_Sprite_PrepOAMCoord: 0x06_E48B,
 	Patch_LoadSongBank:        0x00_8888,
 
+	Reveal_PotItems:            0x01_E6B0,
 	RoomData_PotItems_Pointers: 0x01_DB67,
 
 	SpriteHitBox_OffsetXLow:  0x06_F735,
@@ -36,6 +37,10 @@ var alttpJP10 = romPointers{
 	SpriteHitBox_OffsetYLow:  0x06_F735 + 0x60,
 	SpriteHitBox_OffsetYHigh: 0x06_F735 + 0x80,
 	SpriteHitBox_Height:      0x06_F735 + 0xA0,
+
+	ExtractPointers: func(p *romPointers, e *System) {
+		extractRoomData_PotItems_Pointers(p, e)
+	},
 }
 
 var alttpUS = romPointers{
@@ -66,6 +71,7 @@ var alttpUS = romPointers{
 	Patch_Sprite_PrepOAMCoord: 0x06_E485, // confirmed
 	Patch_LoadSongBank:        0x00_8888, // confirmed
 
+	Reveal_PotItems:            0x01_E6B2, // confirmed
 	RoomData_PotItems_Pointers: 0x01_DB69, // confirmed
 
 	SpriteHitBox_OffsetXLow:  0x06_F72F, // confirmed
@@ -74,4 +80,57 @@ var alttpUS = romPointers{
 	SpriteHitBox_OffsetYLow:  0x06_F72F + 0x60,
 	SpriteHitBox_OffsetYHigh: 0x06_F72F + 0x80,
 	SpriteHitBox_Height:      0x06_F72F + 0xA0,
+
+	ExtractPointers: func(p *romPointers, e *System) {
+		extractRoomData_PotItems_Pointers(p, e)
+	},
+}
+
+func readBusChunk(e *System, addr uint32, into []byte) {
+	size := uint32(len(into))
+
+	readFn := e.Bus.Read[addr>>4]
+	for i := uint32(0); i < size; addr, i = addr+1, i+1 {
+		if addr&3 == 0 {
+			readFn = e.Bus.Read[addr>>4]
+		}
+		into[i] = readFn(addr)
+	}
+}
+
+func extractRoomData_PotItems_Pointers(p *romPointers, e *System) {
+	// RevealPotItem: ; JP 1.0
+	// #_01E6B0: STA.b $04
+	// #_01E6B2: LDA.w $0B9C
+	// #_01E6B5: AND.w #$FF00
+	// #_01E6B8: STA.w $0B9C
+	// #_01E6BB: LDA.b $A0
+	// #_01E6BD: ASL A
+	// #_01E6BE: TAX
+	// #_01E6BF: LDA.l RoomData_PotItems_Pointers,X
+	// #_01E6C3: STA.b $00
+	// #_01E6C5: LDA.w #RoomData_PotItems_Pointers>>16
+	// #_01E6C8: STA.b $02
+	// #_01E6CA: LDY.w #$FFFD
+	// #_01E6CD: LDX.w #$FFFF
+
+	// verify first 16 bytes of code:
+	c0 := [16]byte{}
+	readBusChunk(e, p.Reveal_PotItems, c0[:])
+	if c0 != [16]byte{
+		0x85, 0x04,
+		0xAD, 0x9C, 0x0B,
+		0x29, 0x00, 0xFF,
+		0x8D, 0x9C, 0x0B,
+		0xA5, 0xA0,
+		0x0A,
+		0xAA,
+		0xBF} {
+		return
+	}
+
+	// read 3-byte pointer we're interested in:
+	lhb := [3]byte{}
+	readBusChunk(e, p.Reveal_PotItems+0x10, lhb[:])
+	p.RoomData_PotItems_Pointers = uint32(lhb[0]) | uint32(lhb[1])<<8 | uint32(lhb[2])<<16
 }

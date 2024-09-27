@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"roomloader/taskqueue"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +117,7 @@ type romPointers struct {
 
 	Patch_LoadSongBank uint32 // 0x00_8888
 
+	Reveal_PotItems            uint32 // 0x01_E6B0
 	RoomData_PotItems_Pointers uint32 // 0x01_DB67
 
 	SpriteHitBox_OffsetXLow  uint32
@@ -124,6 +126,8 @@ type romPointers struct {
 	SpriteHitBox_OffsetYLow  uint32
 	SpriteHitBox_OffsetYHigh uint32
 	SpriteHitBox_Height      uint32
+
+	ExtractPointers func(p *romPointers, e *System)
 }
 
 var alttp romPointers
@@ -131,7 +135,7 @@ var alttp romPointers
 func main() {
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Println(err)
+			fmt.Printf("main: recovered from error: %v\n%s\n", err, debug.Stack())
 			return
 		}
 	}()
@@ -411,6 +415,13 @@ func main() {
 		}
 	}
 
+	if err = e.InitEmulator(); err != nil {
+		panic(err)
+	}
+
+	// override "constants" with extractable pointers from code:
+	alttp.ExtractPointers(&alttp, &e)
+
 	// make data directory:
 	{
 		_, romFilename := filepath.Split(romPath)
@@ -425,10 +436,6 @@ func main() {
 		fmt.Printf("chdir `%s`\n", romFilename)
 		_ = os.MkdirAll(romFilename, 0755)
 		_ = os.Chdir(romFilename)
-	}
-
-	if err = e.InitEmulator(); err != nil {
-		panic(err)
 	}
 
 	setupAlttp(&e)
