@@ -732,16 +732,16 @@ func main() {
 			f := 0
 
 			if true {
-				write8(e.WRAM[:], 0x10, 0x05)
-				write8(e.WRAM[:], 0x11, 0x00)
-				write8(e.WRAM[:], 0xB0, 0x00)
+				write8(wram, 0x10, 0x05)
+				write8(wram, 0x11, 0x00)
+				write8(wram, 0xB0, 0x00)
 				fmt.Println("module 05")
 
 				fmt.Printf(
 					"frame: %02X %02X %02X\n",
-					read8(e.WRAM[:], 0x010),
-					read8(e.WRAM[:], 0x011),
-					read8(e.WRAM[:], 0x0B0),
+					read8(wram, 0x010),
+					read8(wram, 0x011),
+					read8(wram, 0x0B0),
 				)
 				for i := 0; i < 256; i++ {
 					if err = e.ExecAt(runFramePC, donePC); err != nil {
@@ -753,13 +753,13 @@ func main() {
 					fmt.Printf(
 						"f%04d: %02X %02X %02X\n",
 						f,
-						read8(e.WRAM[:], 0x010),
-						read8(e.WRAM[:], 0x011),
-						read8(e.WRAM[:], 0x0B0),
+						read8(wram, 0x010),
+						read8(wram, 0x011),
+						read8(wram, 0x0B0),
 					)
 
 					// wait until submodule goes back to 0:
-					if read8(e.WRAM[:], 0x011) == 0x00 {
+					if read8(wram, 0x011) == 0x00 {
 						break
 					}
 				}
@@ -855,9 +855,9 @@ func main() {
 					fmt.Printf(
 						"f%04d: %02X %02X %02X\n",
 						f,
-						read8(e.WRAM[:], 0x010),
-						read8(e.WRAM[:], 0x011),
-						read8(e.WRAM[:], 0x0B0),
+						read8(wram, 0x010),
+						read8(wram, 0x011),
+						read8(wram, 0x0B0),
 					)
 					os.WriteFile(
 						fmt.Sprintf("f%04d.wram", f),
@@ -920,17 +920,26 @@ func main() {
 				}
 			}
 
-			pal, bg1p, bg2p, addColor, halfColor := renderOWBGLayers(
-				e.WRAM,
-				(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x0000])))[:],
-				(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x2000])))[:],
-				e.VRAM[0x4000:0x8000],
-			)
-			g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
-			ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-			renderSpriteLabels(g, e.WRAM[:], Supertile(read16(e.WRAM[:], 0xA0)))
-
-			exportPNG("a-test.png", g)
+			{
+				cgram := (*(*[0x100]uint16)(unsafe.Pointer(&wram[0xC300])))[:]
+				pal := cgramToPalette(cgram)
+				bg := [2]*image.Paletted{
+					image.NewPaletted(image.Rect(0, 0, 0x80*8, 0x80*8), pal),
+					image.NewPaletted(image.Rect(0, 0, 0x80*8, 0x80*8), pal),
+				}
+				renderMap8(bg, 0x80, map8[:], e.VRAM[0x4000:0x8000], drawBG1p0, drawBG1p1)
+				// pal, bg1p, bg2p, addColor, halfColor := renderOWBGLayers(
+				// 	e.WRAM,
+				// 	(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x0000])))[:],
+				// 	(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x2000])))[:],
+				// 	e.VRAM[0x4000:0x8000],
+				// )
+				// g := image.NewNRGBA(image.Rect(0, 0, 0x80*8, 0x80*8))
+				// ComposeToNonPaletted(g, pal, bg1p, bg2p, false, false)
+				// renderSpriteLabels(g, wram, Supertile(read16(wram, 0xA0)))
+				exportPNG("a-test-bg1.png", bg[0])
+				exportPNG("a-test-bg2.png", bg[1])
+			}
 
 			RenderGIF(&a, "a-test.gif")
 		}(&e)

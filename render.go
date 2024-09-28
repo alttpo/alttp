@@ -1854,6 +1854,27 @@ func renderVRAMBG(g [2]*image.Paletted, bg []uint16, tiles []uint8, p0 bool, p1 
 	}
 }
 
+func renderMap8(g [2]*image.Paletted, wh int, map8 []uint16, tiles []uint8, p0 bool, p1 bool) {
+	// wh == 0x40 for underworld
+	// wh == 0x80 for overworld (large area)
+	a := uint32(0)
+	for ty := (0); ty < wh; ty++ {
+		for tx := (0); tx < wh; tx, a = tx+1, a+1 {
+			z := map8[a]
+
+			// priority check:
+			p := (z & 0x2000) >> 13
+			if p == 0 && !p0 {
+				continue
+			}
+			if p == 1 && !p1 {
+				continue
+			}
+			draw4bppBGTile(g[p], z, tiles, tx, ty)
+		}
+	}
+}
+
 func draw4bppBGTile(g *image.Paletted, z uint16, tiles []uint8, tx int, ty int) {
 	//High     Low          Legend->  c: Starting character (tile) number
 	//vhopppcc cccccccc               h: horizontal flip  v: vertical flip
