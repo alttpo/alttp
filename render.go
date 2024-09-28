@@ -1415,6 +1415,71 @@ func ComposeToNonPaletted(
 	}
 }
 
+func ComposeToNonPalettedOW(
+	dst draw.Image,
+	pal color.Palette,
+	bg1p [2]*image.Paletted,
+	bg2p [2]*image.Paletted,
+	wh int,
+	addColor bool,
+	halfColor bool,
+) {
+	mx := dst.Bounds().Min.X
+	my := dst.Bounds().Min.Y
+	if halfColor {
+		// color math: add half
+		for y := 0; y < wh*8; y++ {
+			for x := 0; x < wh*8; x++ {
+				bg1c := pick(bg1p[0].ColorIndexAt(x, y), bg1p[1].ColorIndexAt(x, y))
+				bg2c := pick(bg2p[0].ColorIndexAt(x, y), bg2p[1].ColorIndexAt(x, y))
+				if bg2c != 0 && bg1c != 0 {
+					r1, g1, b1, _ := pal[bg1c].RGBA()
+					r2, g2, b2, _ := pal[bg2c].RGBA()
+					c := color.RGBA64{
+						R: sat(r1>>1 + r2>>1),
+						G: sat(g1>>1 + g2>>1),
+						B: sat(b1>>1 + b2>>1),
+						A: 0xffff,
+					}
+					dst.Set(mx+x, my+y, c)
+				} else {
+					c := pick(bg1c, bg2c)
+					dst.Set(mx+x, my+y, pal[c])
+				}
+			}
+		}
+	} else if addColor {
+		// color math: add
+		for y := 0; y < wh*8; y++ {
+			for x := 0; x < wh*8; x++ {
+				bg1c := pick(bg1p[0].ColorIndexAt(x, y), bg1p[1].ColorIndexAt(x, y))
+				bg2c := pick(bg2p[0].ColorIndexAt(x, y), bg2p[1].ColorIndexAt(x, y))
+				r1, g1, b1, _ := pal[bg1c].RGBA()
+				r2, g2, b2, _ := pal[bg2c].RGBA()
+				c := color.RGBA64{
+					R: sat(r1 + r2),
+					G: sat(g1 + g2),
+					B: sat(b1 + b2),
+					A: 0xffff,
+				}
+				dst.Set(mx+x, my+y, c)
+			}
+		}
+	} else {
+		// no color math:
+		for y := 0; y < wh*8; y++ {
+			for x := 0; x < wh*8; x++ {
+				c0 := bg1p[0].ColorIndexAt(x, y)
+				c1 := bg1p[1].ColorIndexAt(x, y)
+				c2 := bg2p[0].ColorIndexAt(x, y)
+				c3 := bg2p[1].ColorIndexAt(x, y)
+				c := pick(pick(c0, c1), pick(c2, c3))
+				dst.Set(mx+x, my+y, pal[c])
+			}
+		}
+	}
+}
+
 func ComposeToPaletted(
 	dst *image.Paletted,
 	pal color.Palette,

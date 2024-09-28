@@ -732,6 +732,7 @@ func main() {
 			f := 0
 
 			if true {
+				// start new game:
 				write8(wram, 0x10, 0x05)
 				write8(wram, 0x11, 0x00)
 				write8(wram, 0xB0, 0x00)
@@ -747,7 +748,7 @@ func main() {
 					if err = e.ExecAt(runFramePC, donePC); err != nil {
 						panic(err)
 					}
-					renderGifFrame()
+					// renderGifFrame()
 
 					f++
 					fmt.Printf(
@@ -767,9 +768,8 @@ func main() {
 
 			if true {
 				// load entrance for Hyrule Castle to get to a "large area":
-
-				// poke the entrance ID into our asm code:
 				e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x04
+				// e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x02
 
 				if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
 					panic(err)
@@ -787,39 +787,6 @@ func main() {
 				f++
 				fmt.Println(f)
 				renderGifFrame()
-			}
-
-			if false {
-				fmt.Println("run 2 frames")
-				//e.Logger = os.Stdout
-				//e.LoggerCPU = os.Stdout
-				for n := 0; n < 30; n++ {
-					if err = e.ExecAt(runFramePC, donePC); err != nil {
-						panic(err)
-					}
-					f++
-					fmt.Println(f)
-					renderGifFrame()
-				}
-
-				RenderGIF(&a, "test.gif")
-				return
-			}
-
-			if false {
-				// emulate until module=7,submodule=0:
-				fmt.Println("wait until module 7")
-				for {
-					if read8(wram, 0x10) == 0x7 && read8(wram, 0x11) == 0 {
-						break
-					}
-					if err = e.ExecAt(runFramePC, donePC); err != nil {
-						panic(err)
-					}
-					f++
-					fmt.Println(f)
-					renderGifFrame()
-				}
 			}
 
 			if true {
@@ -864,7 +831,7 @@ func main() {
 						e.WRAM[0x2000:0x6000],
 						0644,
 					)
-					renderGifFrame()
+					// renderGifFrame()
 				}
 			}
 
@@ -916,32 +883,32 @@ func main() {
 					}
 					f++
 					fmt.Println(f)
-					renderGifFrame()
+					// renderGifFrame()
 				}
 			}
 
 			{
 				cgram := (*(*[0x100]uint16)(unsafe.Pointer(&wram[0xC300])))[:]
 				pal := cgramToPalette(cgram)
-				bg := [2]*image.Paletted{
+				bg1 := [2]*image.Paletted{
 					image.NewPaletted(image.Rect(0, 0, 0x80*8, 0x80*8), pal),
 					image.NewPaletted(image.Rect(0, 0, 0x80*8, 0x80*8), pal),
 				}
-				renderMap8(bg, 0x80, map8[:], e.VRAM[0x4000:0x8000], drawBG1p0, drawBG1p1)
-				// pal, bg1p, bg2p, addColor, halfColor := renderOWBGLayers(
-				// 	e.WRAM,
-				// 	(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x0000])))[:],
-				// 	(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x2000])))[:],
-				// 	e.VRAM[0x4000:0x8000],
-				// )
-				// g := image.NewNRGBA(image.Rect(0, 0, 0x80*8, 0x80*8))
-				// ComposeToNonPaletted(g, pal, bg1p, bg2p, false, false)
+				bg2 := [2]*image.Paletted{
+					image.NewPaletted(image.Rectangle{}, nil),
+					image.NewPaletted(image.Rectangle{}, nil),
+				}
+				renderMap8(bg1, 0x80, map8[:], e.VRAM[0x4000:0x8000], drawBG1p0, drawBG1p1)
+				// compose the priority layers:
+				g := image.NewNRGBA(image.Rect(0, 0, 0x80*8, 0x80*8))
+				ComposeToNonPalettedOW(g, pal, bg1, bg2, 0x80, false, false)
 				// renderSpriteLabels(g, wram, Supertile(read16(wram, 0xA0)))
-				exportPNG("a-test-bg1.png", bg[0])
-				exportPNG("a-test-bg2.png", bg[1])
+				// exportPNG("a-test-bg1p0.png", bg1[0])
+				// exportPNG("a-test-bg1p1.png", bg1[1])
+				exportPNG("a-test.png", g)
 			}
 
-			RenderGIF(&a, "a-test.gif")
+			// RenderGIF(&a, "a-test.gif")
 		}(&e)
 		return
 	}
