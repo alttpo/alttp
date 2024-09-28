@@ -120,6 +120,9 @@ type romPointers struct {
 	Reveal_PotItems            uint32 // 0x01_E6B0
 	RoomData_PotItems_Pointers uint32 // 0x01_DB67
 
+	Map16Definitions   uint32 // 0x0F_8000
+	OverworldTileTypes uint32 // 0x0F_FD94
+
 	SpriteHitBox_OffsetXLow  uint32
 	SpriteHitBox_OffsetXHigh uint32
 	SpriteHitBox_Width       uint32
@@ -866,26 +869,39 @@ func main() {
 			}
 
 			// decode map16 overworld from $7E2000 into what we're used to seeing for the underworld at $7F2000:
+			map8 := [0x80 * 0x80]uint16{}
 			tiles := [0x80 * 0x80]byte{}
 			for row := uint32(0); row < 0x80; row += 2 {
 				for col := uint32(0); col < 0x80; col += 2 {
+					// read map16 blocks from WRAM at $7E2000:
 					m16 := uint32(read16(e.WRAM[0x2000:], (row*0x40 + col)))
-					//   Map16Definitions: 0x0F_8000
+					// translate into map8 blocks via Map16Definitions:
 					df := [4]uint16{
-						e.Bus.Read16(0x0F_8000+(m16<<3)+0) & 0x01FF,
-						e.Bus.Read16(0x0F_8000+(m16<<3)+2) & 0x01FF,
-						e.Bus.Read16(0x0F_8000+(m16<<3)+4) & 0x01FF,
-						e.Bus.Read16(0x0F_8000+(m16<<3)+6) & 0x01FF,
+						e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 0),
+						e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 2),
+						e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 4),
+						e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 6),
 					}
-					// OverworldTileTypes: 0x0F_FD94
-					tiles[((row+0)*0x80)+(col+0)] = e.Bus.Read8(0x0F_FD94 + uint32(df[0]))
-					tiles[((row+0)*0x80)+(col+1)] = e.Bus.Read8(0x0F_FD94 + uint32(df[1]))
-					tiles[((row+1)*0x80)+(col+0)] = e.Bus.Read8(0x0F_FD94 + uint32(df[2]))
-					tiles[((row+1)*0x80)+(col+1)] = e.Bus.Read8(0x0F_FD94 + uint32(df[3]))
+					// store map8 blocks:
+					map8[((row+0)*0x80)+(col+0)] = df[0]
+					map8[((row+0)*0x80)+(col+1)] = df[1]
+					map8[((row+1)*0x80)+(col+0)] = df[2]
+					map8[((row+1)*0x80)+(col+1)] = df[3]
+					// translate presentation map8 blocks into tile types:
+					tiles[((row+0)*0x80)+(col+0)] = e.Bus.Read8(alttp.OverworldTileTypes + uint32(df[0]&0x01FF))
+					tiles[((row+0)*0x80)+(col+1)] = e.Bus.Read8(alttp.OverworldTileTypes + uint32(df[1]&0x01FF))
+					tiles[((row+1)*0x80)+(col+0)] = e.Bus.Read8(alttp.OverworldTileTypes + uint32(df[2]&0x01FF))
+					tiles[((row+1)*0x80)+(col+1)] = e.Bus.Read8(alttp.OverworldTileTypes + uint32(df[3]&0x01FF))
 				}
 			}
+
 			os.WriteFile(
-				"overworld.wram",
+				"overworld.map8",
+				(*(*[0x80 * 0x80 * 2]byte)(unsafe.Pointer(&map8[0])))[:],
+				0644,
+			)
+			os.WriteFile(
+				"overworld.tmap",
 				tiles[:],
 				0644,
 			)

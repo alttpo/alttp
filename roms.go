@@ -31,6 +31,9 @@ var alttpJP10 = romPointers{
 	Reveal_PotItems:            0x01_E6B0,
 	RoomData_PotItems_Pointers: 0x01_DB67,
 
+	Map16Definitions:   0x0F_8000,
+	OverworldTileTypes: 0x0F_FD94,
+
 	SpriteHitBox_OffsetXLow:  0x06_F735,
 	SpriteHitBox_OffsetXHigh: 0x06_F735 + 0x20,
 	SpriteHitBox_Width:       0x06_F735 + 0x40,
@@ -73,6 +76,9 @@ var alttpUS = romPointers{
 
 	Reveal_PotItems:            0x01_E6B2, // confirmed
 	RoomData_PotItems_Pointers: 0x01_DB69, // confirmed
+
+	Map16Definitions:   0x0F_8000, // confirmed
+	OverworldTileTypes: 0x0E_9459, // confirmed
 
 	SpriteHitBox_OffsetXLow:  0x06_F72F, // confirmed
 	SpriteHitBox_OffsetXHigh: 0x06_F72F + 0x20,
