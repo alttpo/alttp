@@ -26,3 +26,7 @@ func (d *Door) IsEdge() bool {
 	ok, _, _, _ := d.Pos.IsDoorEdge()
 	return ok
 }
+
+func (d *Door) IsOverworldExit() bool {
+	return d.Type.IsOverworldExit()
+}

@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
-	"golang.org/x/image/draw"
-	"golang.org/x/image/font"
-	"golang.org/x/image/font/inconsolata"
-	"golang.org/x/image/math/fixed"
 	"image"
 	"image/color"
 	"os"
 	"slices"
 	"unsafe"
+
+	"golang.org/x/image/draw"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/inconsolata"
+	"golang.org/x/image/math/fixed"
 )
 
 func reachabilityAnalysis(initEmu *System) (err error) {
@@ -271,7 +272,7 @@ func reachabilityAnalysis(initEmu *System) (err error) {
 				}
 
 				// skip dungeon exits to overworld:
-				if door.Type.IsExit() {
+				if door.Type.IsOverworldExit() {
 					continue
 				}
 

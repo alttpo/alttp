@@ -284,6 +284,32 @@ func createRoom(t T, e *System) (room *RoomState) {
 		room.Reachable[i] = 0x01
 	}
 
+	// find custom overworld exits from underworld:
+	// note: we don't ever need to exit from underworld back to the same overworld area
+	for j := uint32(0); j < alttp.UnderworldExitCount; j++ {
+		// there should only be one custom overworld exit per underworld room:
+		exitSupertile := e.Bus.Read16(alttp.UnderworldExitData + (j << 1))
+		if exitSupertile != uint16(t.Supertile) {
+			continue
+		}
+
+		// should only have one custom exit per room:
+		room.OverworldExit = OverworldExit{
+			AreaID: e.Bus.Read8(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 2) + (j)),
+			Y:      e.Bus.Read16(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 9) + (j << 1)),
+			X:      e.Bus.Read16(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 11) + (j << 1)),
+			// C is assigned in below loop processing doors
+		}
+		room.HasOverworldExit = true
+		fmt.Printf(
+			"$%03X: overworld exit to %02X at %04X,%04X\n",
+			uint16(t.Supertile),
+			room.OverworldExit.AreaID,
+			room.OverworldExit.X,
+			room.OverworldExit.Y,
+		)
+	}
+
 	// find doors:
 	for m := uint32(0); m < 32; m += 2 {
 		tpos := read16(wram, 0x19A0+m)
@@ -300,6 +326,12 @@ func createRoom(t T, e *System) (room *RoomState) {
 		room.Doors = append(room.Doors, door)
 
 		fmt.Printf("$%03X: door[%1X] type=%s dir=%s pos=%s\n", uint16(room.Supertile), m>>1, door.Type, door.Dir, door.Pos)
+
+		if door.IsOverworldExit() {
+			// mark the exit door:
+			room.OverworldExit.Door = &room.Doors[len(room.Doors)-1]
+			room.OverworldExit.C = door.Pos
+		}
 	}
 
 	// find layer-swap tiles in doorways:
@@ -333,33 +365,17 @@ func createRoom(t T, e *System) (room *RoomState) {
 		for i := range room.Doors {
 			if room.Doors[i].Pos&0x0FFF == c {
 				room.Doors[i].IsExit = true
+
+				// mark the exit door:
+				room.OverworldExit.Door = &room.Doors[i]
+				room.OverworldExit.C = room.Doors[i].Pos
 				break
 			}
 		}
 	}
 
-	// find custom overworld exits from underworld:
-	// note: we don't ever need to exit from underworld back to the same overworld area
-	for j := uint32(0); j < alttp.UnderworldExitCount; j++ {
-		// there should only be one custom overworld exit per underworld room:
-		exitSupertile := e.Bus.Read16(alttp.UnderworldExitData + (j << 1))
-		if exitSupertile != uint16(t.Supertile) {
-			continue
-		}
-
-		room.OverworldExit = OverworldExit{
-			AreaID: e.Bus.Read8(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 2) + (j)),
-			Y:      e.Bus.Read16(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 9) + (j << 1)),
-			X:      e.Bus.Read16(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 11) + (j << 1)),
-		}
-		room.HasOverworldExit = true
-		fmt.Printf(
-			"$%03X: overworld exit to %02X at %04X,%04X\n",
-			uint16(t.Supertile),
-			room.OverworldExit.AreaID,
-			room.OverworldExit.X,
-			room.OverworldExit.Y,
-		)
+	if room.HasOverworldExit && room.OverworldExit.Door == nil {
+		fmt.Printf("$%03X: BAD overworld exit - missing door!\n", uint16(t.Supertile))
 	}
 
 	room.preprocessRoom()
@@ -885,6 +901,16 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 						room.TilesVisited[c] = empty{}
 
 						c, _, ok = c.MoveBy(traverseDir, 1)
+					}
+				}
+			}
+
+			if room.HasOverworldExit {
+				// custom exits without doors can exist for boss rooms e.g. agahnim 1
+				if room.OverworldExit.Door != nil {
+					if !room.OverworldExit.Used && room.OverworldExit.Door.ContainsCoord(c) {
+						fmt.Printf("$%03X: hit overworld exit\n", uint16(t.Supertile))
+						room.OverworldExit.Used = true
 					}
 				}
 			}

@@ -577,6 +577,10 @@ type OverworldExit struct {
 	AreaID uint8
 	Y      uint16
 	X      uint16
+
+	C    MapCoord
+	Door *Door
+	Used bool
 }
 
 type RoomState struct {
@@ -852,7 +856,7 @@ func (room *RoomState) Init(ep EntryPoint) (err error) {
 				}
 			}
 
-			if door.Type.IsExit() {
+			if door.Type.IsOverworldExit() {
 				lyr, row, col := door.Pos.RowCol()
 				// patch up the door tiles to prevent reachability from exiting:
 				for y := uint16(0); y < 4; y++ {

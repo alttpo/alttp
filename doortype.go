@@ -71,7 +71,7 @@ func (t DoorType) IsEdgeDoorwayToNeighbor() bool {
 	return true
 }
 
-func (t DoorType) IsExit() bool {
+func (t DoorType) IsOverworldExit() bool {
 	if t >= 0x04 && t <= 0x06 {
 		// exit door:
 		return true
