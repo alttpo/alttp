@@ -681,7 +681,8 @@ func main() {
 				fmt.Println("module 05")
 
 				fmt.Printf(
-					"frame: %02X %02X %02X\n",
+					"f%04d: %02X %02X %02X\n",
+					f,
 					read8(wram, 0x010),
 					read8(wram, 0x011),
 					read8(wram, 0x0B0),
@@ -710,11 +711,44 @@ func main() {
 
 			if true {
 				// load entrance for Hyrule Castle to get to a "large area":
-				e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x04
-				// e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x02
+				// e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x04
+				e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x02
 
 				if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
 					panic(err)
+				}
+			}
+
+			if true {
+				// move to module $08 to exit the underworld:
+				fmt.Println("module $08")
+				write8(wram, 0x10, 0x08)
+				write8(wram, 0x11, 0x00)
+				// run frames until back to module $09:
+				for i := 0; i < 256; i++ {
+					// e.LoggerCPU = os.Stdout
+					if err = e.ExecAt(runFramePC, donePC); err != nil {
+						panic(err)
+					}
+					// e.LoggerCPU = nil
+					// renderGifFrame()
+
+					f++
+					fmt.Printf(
+						"f%04d: %02X %02X %02X\n",
+						f,
+						read8(wram, 0x010),
+						read8(wram, 0x011),
+						read8(wram, 0x0B0),
+					)
+
+					// wait until module 09 or 0B (overworld):
+					if m := read8(wram, 0x10); m == 0x09 || m == 0x0B {
+						// wait until submodule goes back to 0:
+						if read8(wram, 0x011) == 0x00 {
+							break
+						}
+					}
 				}
 			}
 
@@ -731,7 +765,7 @@ func main() {
 				renderGifFrame()
 			}
 
-			if true {
+			if false {
 				// hold DOWN to exit underworld out to overworld:
 				//                            BYsSudlr AXLRvvvv
 				e.HWIO.ControllerInput[0] = 0b00000100_00000000
