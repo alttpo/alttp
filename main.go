@@ -835,11 +835,15 @@ func main() {
 				}
 			}
 
+			// grab area width,height extents in tiles:
+			ah := int(read16(wram, 0x070A)+0x10) >> 3
+			aw := int(read16(wram, 0x070E) + 0x02)
+
 			// decode map16 overworld from $7E2000 into what we're used to seeing for the underworld at $7F2000:
 			map8 := [0x80 * 0x80]uint16{}
 			tiles := [0x80 * 0x80]byte{}
-			for row := uint32(0); row < 0x80; row += 2 {
-				for col := uint32(0); col < 0x80; col += 2 {
+			for row := uint32(0); row < uint32(ah); row += 2 {
+				for col := uint32(0); col < uint32(aw); col += 2 {
 					// read map16 blocks from WRAM at $7E2000:
 					m16 := uint32(read16(e.WRAM[0x2000:], (row*0x40 + col)))
 					// translate into map8 blocks via Map16Definitions:
@@ -898,7 +902,7 @@ func main() {
 					image.NewPaletted(image.Rectangle{}, nil),
 					image.NewPaletted(image.Rectangle{}, nil),
 				}
-				renderMap8(bg1, 0x80, map8[:], e.VRAM[0x4000:0x8000], drawBG1p0, drawBG1p1)
+				renderMap8(bg1, aw, ah, map8[:], e.VRAM[0x4000:0x8000], drawBG1p0, drawBG1p1)
 				// compose the priority layers:
 				g := image.NewNRGBA(image.Rect(0, 0, 0x80*8, 0x80*8))
 				ComposeToNonPalettedOW(g, pal, bg1, bg2, 0x80, false, false)
