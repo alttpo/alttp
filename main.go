@@ -77,64 +77,6 @@ var fastRomBank uint32 = 0
 
 var roomsWithUnreachableWarpPits map[Supertile]bool
 
-type romPointers struct {
-	Module_MainRouting uint32 // 0x00_80B5
-
-	Underworld_LoadRoom                         uint32 // 0x01_873A
-	Underworld_LoadCustomTileAttributes         uint32 // 0x0F_FD65
-	Underworld_LoadAttributeTable               uint32 // 0x01_B8BF
-	Underworld_LoadEntrance_DoPotsBlocksTorches uint32 // 0x02_D854
-
-	Module06_UnderworldLoad_after_JSR_Underworld_LoadEntrance uint32 // 0x02_8157
-
-	LoadDefaultTileTypes uint32 // 0x0F_FD2A
-
-	Intro_InitializeDefaultGFX                                             uint32 // 0x0C_C208
-	Intro_InitializeDefaultGFX_after_JSL_DecompressAnimatedUnderworldTiles uint32 // 0x0C_C237
-
-	Intro_CreateTextPointers      uint32 // 0x02_8022
-	DecompressFontGFX             uint32 // 0x0E_F572
-	LoadItemGFXIntoWRAM4BPPBuffer uint32 // 0x00_D271
-
-	InitializeSaveFile uint32 // 0x0C_DB3E
-	CopySaveToWRAM     uint32 // 0x0C_CEB2
-
-	Ancilla_TerminateSelectInteractives uint32 // 0x09_AC57
-
-	NMI_PrepareSprites uint32 // 0x00_85FC
-	NMI_DoUpdates      uint32 // 0x00_89E0
-	NMI_ReadJoypads    uint32 // 0x00_83D1
-	ClearOAMBuffer     uint32 // 0x00_841E
-
-	Underworld_HandleRoomTags uint32 // 0x01_C2FD
-
-	Patch_JSR_Underworld_LoadSongBankIfNeeded uint32 // 0x02_8293
-	Patch_SEP_20_RTL                          uint32 // 0x02_82BC ; SEP #$20; RTL
-
-	Patch_RebuildHUD_Keys uint32 // 0x0D_FA88 patch to RTL
-
-	Patch_Sprite_PrepOAMCoord uint32 // 0x06_E48B
-
-	Patch_LoadSongBank uint32 // 0x00_8888
-
-	Reveal_PotItems            uint32 // 0x01_E6B0
-	RoomData_PotItems_Pointers uint32 // 0x01_DB67
-
-	Map16Definitions   uint32 // 0x0F_8000
-	OverworldTileTypes uint32 // 0x0F_FD94
-
-	SpriteHitBox_OffsetXLow  uint32
-	SpriteHitBox_OffsetXHigh uint32
-	SpriteHitBox_Width       uint32
-	SpriteHitBox_OffsetYLow  uint32
-	SpriteHitBox_OffsetYHigh uint32
-	SpriteHitBox_Height      uint32
-
-	ExtractPointers func(p *romPointers, e *System)
-}
-
-var alttp romPointers
-
 func main() {
 	defer func() {
 		if err := recover(); err != nil {
