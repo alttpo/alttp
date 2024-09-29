@@ -573,6 +573,12 @@ func (ep EntryPoint) String() string {
 	return fmt.Sprintf("{%s, %s, %s}", ep.Supertile, ep.Point, ep.Direction)
 }
 
+type OverworldExit struct {
+	AreaID uint8
+	Y      uint16
+	X      uint16
+}
+
 type RoomState struct {
 	Mutex sync.Mutex
 
@@ -632,6 +638,9 @@ type RoomState struct {
 	lifo        []ScanState
 
 	HasReachablePit bool
+
+	HasOverworldExit bool
+	OverworldExit    OverworldExit
 }
 
 func CreateRoom(ent *Entrance, st Supertile, initEmu *System) (room *RoomState) {

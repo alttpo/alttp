@@ -38,8 +38,10 @@ type SE struct {
 
 type ReachTask struct {
 	InitialEmulator *System
-	EntranceWRAM    *WRAMArray
-	EntranceVRAM    *VRAMArray
+
+	// Underworld:
+	EntranceWRAM *WRAMArray
+	EntranceVRAM *VRAMArray
 
 	Rooms     map[uint16]*RoomState
 	RoomsLock *sync.Mutex
@@ -48,6 +50,10 @@ type ReachTask struct {
 	Supertile  Supertile
 
 	SE SE
+
+	// Overworld:
+	ExitID uint8
+	Area   uint8
 }
 
 type T = *ReachTask
@@ -330,6 +336,30 @@ func createRoom(t T, e *System) (room *RoomState) {
 				break
 			}
 		}
+	}
+
+	// find custom overworld exits from underworld:
+	// note: we don't ever need to exit from underworld back to the same overworld area
+	for j := uint32(0); j < alttp.UnderworldExitCount; j++ {
+		// there should only be one custom overworld exit per underworld room:
+		exitSupertile := e.Bus.Read16(alttp.UnderworldExitData + (j << 1))
+		if exitSupertile != uint16(t.Supertile) {
+			continue
+		}
+
+		room.OverworldExit = OverworldExit{
+			AreaID: e.Bus.Read8(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 2) + (j)),
+			Y:      e.Bus.Read16(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 9) + (j << 1)),
+			X:      e.Bus.Read16(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 11) + (j << 1)),
+		}
+		room.HasOverworldExit = true
+		fmt.Printf(
+			"$%03X: overworld exit to %02X at %04X,%04X\n",
+			uint16(t.Supertile),
+			room.OverworldExit.AreaID,
+			room.OverworldExit.X,
+			room.OverworldExit.Y,
+		)
 	}
 
 	room.preprocessRoom()

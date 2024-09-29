@@ -464,7 +464,7 @@ func main() {
 	}
 
 	// run jobs starting from entrances:
-	if false {
+	if true {
 		roomsMap := make(map[uint16]*RoomState, 0x128)
 		roomsLock := sync.Mutex{}
 
@@ -627,7 +627,7 @@ func main() {
 	}
 
 	// overworld screens:
-	if true {
+	if false {
 		func(initEmu *System) {
 			e := &System{
 				Logger:    nil,
