@@ -80,7 +80,7 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 		return
 	}
 
-	overworldFloodFill(q, t, area)
+	area.overworldFloodFill(q, t)
 }
 
 func createArea(t T, e *System) (a *Area) {
@@ -146,24 +146,54 @@ func createArea(t T, e *System) (a *Area) {
 		}
 	}
 
-	os.WriteFile(
-		fmt.Sprintf("ow%02X.map8", t.AreaID),
-		(*(*[0x80 * 0x80 * 2]byte)(unsafe.Pointer(&a.Map8[0])))[:],
-		0644,
-	)
-	os.WriteFile(
-		fmt.Sprintf("ow%02X.tmap", t.AreaID),
-		a.Tiles[:],
-		0644,
-	)
+	// find all overworld entrances to underworld:
+	ec := alttp.Overworld_EntranceCount
+	for j := uint32(0); j < ec; j++ {
+		aid := e.Bus.Read16(alttp.Overworld_EntranceScreens + j<<1)
+		if aid != uint16(a.AreaID) {
+			continue
+		}
+
+		ent := AreaEntrance{
+			TileIndex:  e.Bus.Read16(alttp.Overworld_EntranceScreens + (ec * 2) + j<<1),
+			EntranceID: e.Bus.Read8(alttp.Overworld_EntranceScreens + (ec * 4) + j),
+		}
+		a.Entrances = append(a.Entrances, ent)
+		fmt.Printf("OW$%02X: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, ent.TileIndex)
+	}
+
+	if true {
+		os.WriteFile(
+			fmt.Sprintf("ow%02X.map8", a.AreaID),
+			(*(*[0x80 * 0x80 * 2]byte)(unsafe.Pointer(&a.Map8[0])))[:],
+			0644,
+		)
+		os.WriteFile(
+			fmt.Sprintf("ow%02X.tmap", a.AreaID),
+			a.Tiles[:],
+			0644,
+		)
+	}
 
 	a.Render()
-	exportPNG(fmt.Sprintf("ow%02X.png", t.AreaID), a.RenderedNRGBA)
+	exportPNG(fmt.Sprintf("ow%02X.png", a.AreaID), a.RenderedNRGBA)
 
 	return
 }
 
-func overworldFloodFill(q Q, t T, area *Area) {
+func (a *Area) overworldFloodFill(q Q, t T) {
 	fmt.Println("TODO: overworldFloodFill")
-	return
+
+	for _, ent := range a.Entrances {
+		// TODO: assume entrances to underworld are reachable
+		q.SubmitTask(&ReachTask{
+			Mode:            ModeUnderworld,
+			Rooms:           t.Rooms,
+			RoomsLock:       t.RoomsLock,
+			Areas:           t.Areas,
+			AreasLock:       t.AreasLock,
+			InitialEmulator: t.InitialEmulator,
+			EntranceID:      ent.EntranceID,
+		}, ReachTaskFromEntranceWorker)
+	}
 }

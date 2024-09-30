@@ -49,8 +49,9 @@ type romPointers struct {
 	UnderworldExitData  uint32 // 0x02_DAEE
 	UnderworldExitCount uint32 // 0x4F
 
-	Overworld_EntranceScreens   uint32 // 0x1B_B96F,
-	Overworld_EntranceTileIndex uint32 // 0x1B_BA71,
+	Overworld_EntranceCount     uint32 // 0x81
+	Overworld_EntranceScreens   uint32 // 0x1B_B96F
+	Overworld_EntranceTileIndex uint32 // 0x1B_BA71
 
 	SpriteHitBox_OffsetXLow  uint32
 	SpriteHitBox_OffsetXHigh uint32
@@ -99,6 +100,7 @@ var alttpJP10 = romPointers{
 	UnderworldExitData:  0x02_DAEE,
 	UnderworldExitCount: 0x4F,
 
+	Overworld_EntranceCount:     0x81,
 	Overworld_EntranceScreens:   0x1B_B96F,
 	Overworld_EntranceTileIndex: 0x1B_BA71,
 
@@ -151,6 +153,7 @@ var alttpUS = romPointers{
 	UnderworldExitData:  0x02_DD8A, // confirmed
 	UnderworldExitCount: 0x4F,      // confirmed
 
+	Overworld_EntranceCount:     0x81,      // confirmed
 	Overworld_EntranceScreens:   0x1B_B96F, // confirmed
 	Overworld_EntranceTileIndex: 0x1B_BA71, // confirmed
 

@@ -28,6 +28,13 @@ type Area struct {
 	WRAM            [0x20000]byte
 	WRAMAfterLoaded [0x20000]byte
 	VRAMTileSet     [0x4000]byte
+
+	Entrances []AreaEntrance
+}
+
+type AreaEntrance struct {
+	TileIndex  uint16
+	EntranceID uint8
 }
 
 func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bool) {
