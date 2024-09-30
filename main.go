@@ -467,6 +467,8 @@ func main() {
 	if true {
 		roomsMap := make(map[uint16]*RoomState, 0x128)
 		roomsLock := sync.Mutex{}
+		areasMap := make(map[uint8]*Area, 0x80)
+		areasLock := sync.Mutex{}
 
 		q := taskqueue.NewQ[*ReachTask](nWorkers, 0x2000)
 
@@ -489,6 +491,8 @@ func main() {
 					InitialEmulator: &e,
 					Rooms:           roomsMap,
 					RoomsLock:       &roomsLock,
+					Areas:           areasMap,
+					AreasLock:       &areasLock,
 				},
 				ReachTaskFromEntranceWorker,
 			)

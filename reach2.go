@@ -36,24 +36,38 @@ type SE struct {
 	wram *WRAMArray
 }
 
-type ReachTask struct {
-	InitialEmulator *System
+type ReachMode int
 
-	// Underworld:
-	EntranceWRAM *WRAMArray
-	EntranceVRAM *VRAMArray
+const (
+	ModeUnderworld ReachMode = iota
+	ModeOverworld
+)
+
+type ReachTask struct {
+	Mode ReachMode
 
 	Rooms     map[uint16]*RoomState
 	RoomsLock *sync.Mutex
+	Areas     map[uint8]*Area
+	AreasLock *sync.Mutex
 
+	InitialEmulator *System
+	EntranceWRAM    *WRAMArray
+	EntranceVRAM    *VRAMArray
+
+	// Underworld:
 	EntranceID uint8
 	Supertile  Supertile
 
 	SE SE
 
 	// Overworld:
-	ExitID uint8
-	Area   uint8
+	AreaID uint8
+	X      uint16
+	Y      uint16
+
+	C OWCoord
+	D Direction
 }
 
 type T = *ReachTask
@@ -581,14 +595,19 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 	pushJob := func(neighborSt Supertile, se SE) {
 		q.SubmitTask(
 			&ReachTask{
+				Mode:      ModeUnderworld,
+				Rooms:     t.Rooms,
+				RoomsLock: t.RoomsLock,
+				Areas:     t.Areas,
+				AreasLock: t.AreasLock,
+
 				InitialEmulator: t.InitialEmulator,
 				EntranceWRAM:    t.EntranceWRAM,
 				EntranceVRAM:    t.EntranceVRAM,
-				EntranceID:      t.EntranceID,
-				Rooms:           t.Rooms,
-				RoomsLock:       t.RoomsLock,
-				Supertile:       neighborSt,
-				SE:              se,
+
+				EntranceID: t.EntranceID,
+				Supertile:  neighborSt,
+				SE:         se,
 			},
 			ReachTaskInterRoom,
 		)
@@ -911,6 +930,23 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					if !room.OverworldExit.Used && room.OverworldExit.Door.ContainsCoord(c) {
 						fmt.Printf("$%03X: hit overworld exit\n", uint16(t.Supertile))
 						room.OverworldExit.Used = true
+						vramCopy := &VRAMArray{}
+						copy(vramCopy[:], room.e.VRAM[:])
+						q.SubmitTask(&ReachTask{
+							Mode:      ModeOverworld,
+							Rooms:     t.Rooms,
+							RoomsLock: t.RoomsLock,
+							Areas:     t.Areas,
+							AreasLock: t.AreasLock,
+
+							InitialEmulator: t.InitialEmulator,
+							EntranceWRAM:    &room.WRAMAfterLoaded,
+							EntranceVRAM:    vramCopy,
+
+							AreaID: room.OverworldExit.AreaID,
+							X:      room.OverworldExit.X,
+							Y:      room.OverworldExit.Y,
+						}, ReachTaskOverworldFromUnderworldWorker)
 					}
 				}
 			}
