@@ -1921,7 +1921,7 @@ func renderVRAMBG(g [2]*image.Paletted, bg []uint16, tiles []uint8, p0 bool, p1 
 
 func renderMap8(g [2]*image.Paletted, aw, ah int, map8 []uint16, tiles []uint8, p0 bool, p1 bool) {
 	a := uint32(0)
-	for ty := (0); ty < ah; a, ty = uint32(ty)*0x80, ty+1 {
+	for ty := (0); ty < ah; a, ty = uint32(ty+1)*0x80, ty+1 {
 		for tx := (0); tx < aw; tx, a = tx+1, a+1 {
 			z := map8[a]
 
