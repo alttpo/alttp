@@ -33,7 +33,7 @@ type Area struct {
 }
 
 type AreaEntrance struct {
-	TileIndex  uint16
+	OWCoord    OWCoord
 	EntranceID uint8
 }
 

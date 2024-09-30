@@ -10,11 +10,11 @@ import (
 func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	var err error
 
-	var area *Area
+	var a *Area
 	var ok bool
 
 	t.AreasLock.Lock()
-	if area, ok = t.Areas[t.AreaID]; !ok {
+	if a, ok = t.Areas[t.AreaID]; !ok {
 		e := &System{}
 		if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
 			panic(err)
@@ -25,7 +25,7 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 			defer func() {
 				if ex := recover(); ex != nil {
 					fmt.Printf("ERROR: %v\n%s", ex, string(debug.Stack()))
-					area = &Area{
+					a = &Area{
 						AreaID:   t.AreaID,
 						IsLoaded: false,
 					}
@@ -70,17 +70,17 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 			}
 			// e.LoggerCPU = nil
 
-			area = createArea(t, e)
+			a = createArea(t, e)
 		}()
-		t.Areas[t.AreaID] = area
+		t.Areas[t.AreaID] = a
 	}
 	t.AreasLock.Unlock()
 
-	if !area.IsLoaded {
+	if !a.IsLoaded {
 		return
 	}
 
-	area.overworldFloodFill(q, t)
+	a.overworldFloodFill(q, t)
 }
 
 func createArea(t T, e *System) (a *Area) {
@@ -155,14 +155,26 @@ func createArea(t T, e *System) (a *Area) {
 		}
 
 		ent := AreaEntrance{
-			TileIndex:  e.Bus.Read16(alttp.Overworld_EntranceScreens + (ec * 2) + j<<1),
+			OWCoord:    Map16ToOWCoord(e.Bus.Read16(alttp.Overworld_EntranceScreens + (ec * 2) + j<<1)),
 			EntranceID: e.Bus.Read8(alttp.Overworld_EntranceScreens + (ec * 4) + j),
 		}
 		a.Entrances = append(a.Entrances, ent)
-		fmt.Printf("OW$%02X: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, ent.TileIndex)
+		fmt.Printf("OW$%02X: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, uint16(ent.OWCoord))
 	}
 
+	fmt.Printf(
+		"OW$%02X: link at %04X, %04X\n",
+		a.AreaID,
+		read16(wram, 0x22),
+		read16(wram, 0x20),
+	)
+
 	if true {
+		os.WriteFile(
+			fmt.Sprintf("ow%02X.map16", a.AreaID),
+			a.WRAM[0x2000:0x6000],
+			0644,
+		)
 		os.WriteFile(
 			fmt.Sprintf("ow%02X.map8", a.AreaID),
 			(*(*[0x80 * 0x80 * 2]byte)(unsafe.Pointer(&a.Map8[0])))[:],
