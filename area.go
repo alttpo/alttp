@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/image/draw"
@@ -35,12 +36,16 @@ type Area struct {
 	WRAMAfterLoaded [0x20000]byte
 	VRAMTileSet     [0x4000]byte
 
-	Entrances []AreaEntrance
+	Entrances    []AreaEntrance
+	TileEntrance map[OWCoord]*AreaEntrance
+
+	Mutex sync.Mutex
 }
 
 type AreaEntrance struct {
 	OWCoord    OWCoord
 	EntranceID uint8
+	Used       bool
 }
 
 func (a *Area) RowCol(c OWCoord) (row, col int) {
@@ -67,7 +72,7 @@ func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bo
 		}
 		return c, d, false
 	case DirSouth:
-		if row <= int(a.Height)-inc {
+		if row <= int(a.Height-1)-inc {
 			return OWCoord(it + (inc << 7)), d, true
 		}
 		return c, d, false
@@ -77,13 +82,47 @@ func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bo
 		}
 		return c, d, false
 	case DirEast:
-		if col <= int(a.Width)-inc {
+		if col <= int(a.Width-1)-inc {
 			return OWCoord(it + inc), d, true
 		}
 		return c, d, false
 	default:
 		panic("bad direction")
 	}
+}
+
+var (
+	validDoorTypes = [...]uint32{
+		0x00FE_014A, 0x00C5_00C4, 0x00FE_014F, 0x0114_0115,
+		0x0115_0114, 0x0175_0174, 0x0156_0155, 0x00F5_00F5,
+		0x00E2_00EE, 0x01EF_01EB, 0x0119_0118, 0x00FE_0146,
+		0x0172_0171, 0x0177_0155, 0x013F_0137, 0x0172_0174,
+		0x0112_0173, 0x0161_0121, 0x0172_0164, 0x014C_0155,
+		0x0156_0157, 0x01EF_0128, 0x00FE_0114, 0x00FE_0123,
+		0x00FE_0113, 0x010B_0109, 0x0173_0118, 0x0143_0161,
+		0x0149_0149, 0x0175_0117, 0x0103_0174, 0x0100_0101,
+		0x01CC_01CC, 0x015E_0131, 0x0167_0051, 0x0128_014E,
+		0x0131_0131, 0x0112_0112, 0x016D_017A, 0x0163_0163,
+		0x0173_0172, 0x00FE_01BD, 0x0113_0152, 0x0177_0167,
+	}
+)
+
+func (a *Area) IsDoorTypeAt(c OWCoord) bool {
+	row, col := a.RowCol(c)
+	if col >= int(a.Width)-1 {
+		return false
+	}
+	if row >= int(a.Height)-1 {
+		return false
+	}
+
+	v := uint32(a.Map8[c]&0x01FF)<<16 | uint32(a.Map8[c+1]&0x01FF)
+	for _, t := range validDoorTypes {
+		if v == t {
+			return true
+		}
+	}
+	return false
 }
 
 // isAlwaysWalkable checks if the tile is always walkable on, regardless of state
@@ -102,7 +141,8 @@ func (a *Area) isAlwaysWalkable(v uint8) bool {
 		v == 0xA0 || // north/south dungeon swap door (for HC to sewers)
 		v&0xF0 == 0x70 || // pots/pegs/blocks
 		v == 0x62 || // bombable floor
-		v == 0x66 || v == 0x67 // crystal pegs (orange/blue):
+		v == 0x66 || v == 0x67 || // crystal pegs (orange/blue)
+		v == 0x50 // bushes
 }
 
 func (a *Area) canHookThru(v uint8) bool {

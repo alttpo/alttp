@@ -104,25 +104,29 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 		uint16(t.Y),
 	)
 
-	linkX := read16(wram, 0x22)
-	linkY := read16(wram, 0x20)
-	fmt.Printf(
-		"OW$%02X: link at abs %04X, %04X\n",
-		a.AreaID,
-		linkX,
-		linkY,
-	)
+	// linkX := read16(wram, 0x22)
+	// linkY := read16(wram, 0x20)
+	// fmt.Printf(
+	// 	"OW$%02X: link at abs %04X, %04X\n",
+	// 	a.AreaID,
+	// 	linkX,
+	// 	linkY,
+	// )
 
-	fmt.Printf(
-		"OW$%02X: link at rel %04X, %04X\n",
-		a.AreaID,
-		linkX-ax,
-		linkY-ay,
-	)
+	// fmt.Printf(
+	// 	"OW$%02X: link at rel %04X, %04X\n",
+	// 	a.AreaID,
+	// 	linkX-ax,
+	// 	linkY-ay,
+	// )
 
 	// set up initial scan state at where Link is:
+	// se := OWSS{
+	// 	c: OWCoord(((linkY-ay)>>3)<<7 + (linkX-ax)>>3),
+	// 	d: DirSouth,
+	// }
 	se := OWSS{
-		c: OWCoord(((linkY-ay)>>3)<<7 + linkX>>3),
+		c: OWCoord(((t.Y-ay)>>3+6)<<7 + (t.X-ax)>>3),
 		d: DirSouth,
 	}
 
@@ -154,6 +158,7 @@ func createArea(t T, e *System) (a *Area) {
 		WRAM:            [131072]byte{},
 		WRAMAfterLoaded: [131072]byte{},
 		VRAMTileSet:     [0x4000]byte{},
+		TileEntrance:    map[OWCoord]*AreaEntrance{},
 	}
 
 	copy(a.WRAM[:], (*e.WRAM)[:])
@@ -164,10 +169,6 @@ func createArea(t T, e *System) (a *Area) {
 	e.WRAM = &a.WRAM
 
 	wram := (*e.WRAM)[:]
-
-	for i := range a.Reachable {
-		a.Reachable[i] = 0x01
-	}
 
 	// grab area width,height extents in tiles:
 	a.Height = (read16(wram, 0x070A) + 0x10) >> 3
@@ -180,14 +181,14 @@ func createArea(t T, e *System) (a *Area) {
 	for row := uint32(0); row < ah; row += 2 {
 		for col := uint32(0); col < aw; col += 2 {
 			// read map16 blocks from WRAM at $7E2000:
-			m16 := uint32(read16(wram[0x2000:], (row*0x40 + col)))
+			m16 := uint32(read16(wram[0x2000:], (row*0x40+col))) << 3
 
 			// translate into map8 blocks via Map16Definitions:
 			df := [4]uint16{
-				e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 0),
-				e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 2),
-				e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 4),
-				e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 6),
+				e.Bus.Read16(alttp.Map16Definitions + (m16 + 0)),
+				e.Bus.Read16(alttp.Map16Definitions + (m16 + 2)),
+				e.Bus.Read16(alttp.Map16Definitions + (m16 + 4)),
+				e.Bus.Read16(alttp.Map16Definitions + (m16 + 6)),
 			}
 
 			// store map8 blocks:
@@ -204,6 +205,10 @@ func createArea(t T, e *System) (a *Area) {
 		}
 	}
 
+	for i := range a.Reachable {
+		a.Reachable[i] = 0x01
+	}
+
 	// find all overworld entrances to underworld:
 	ec := alttp.Overworld_EntranceCount
 	for j := uint32(0); j < ec; j++ {
@@ -217,15 +222,57 @@ func createArea(t T, e *System) (a *Area) {
 			EntranceID: e.Bus.Read8(alttp.Overworld_EntranceScreens + (ec * 4) + j),
 		}
 		a.Entrances = append(a.Entrances, ent)
+
 		fmt.Printf("OW$%02X: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, uint16(ent.OWCoord))
+
+		for y := 0; y < 4; y++ {
+			for x := 0; x < 4; x++ {
+				a.TileEntrance[ent.OWCoord+OWCoord(y*0x80)+OWCoord(x)] = &a.Entrances[len(a.Entrances)-1]
+			}
+		}
+	}
+
+	// open doors:
+	for i := range a.Map8 {
+		c := OWCoord(i)
+		row, col := a.RowCol(c)
+		if col >= int(a.Width)-3 {
+			continue
+		}
+		if row >= int(a.Height)-4 {
+			continue
+		}
+
+		v0 := a.Map8[c+0] & 0x41FF
+		v1 := a.Map8[c+1] & 0x41FF
+		v2 := a.Map8[c+2] & 0x41FF
+		v3 := a.Map8[c+3] & 0x41FF
+		if v0 == 0x0148 && v1 == 0x0149 && v2 == 0x4149 && v3 == 0x4148 {
+			// 1D48 1D49 5D49 5D48
+			// open castle door:
+			a.Tiles[c+0x000] = 0x00
+			a.Tiles[c+0x001] = 0x00
+			a.Tiles[c+0x002] = 0x00
+			a.Tiles[c+0x003] = 0x00
+			a.Tiles[c+0x080] = 0x00
+			a.Tiles[c+0x081] = 0x00
+			a.Tiles[c+0x082] = 0x00
+			a.Tiles[c+0x083] = 0x00
+			a.Tiles[c+0x100] = 0x00
+			a.Tiles[c+0x101] = 0x00
+			a.Tiles[c+0x102] = 0x00
+			a.Tiles[c+0x103] = 0x00
+		}
+		if v0 == 0x00E9 && v1 == 0x40E9 {
+			// at top of regular door: (e.g. village house)
+			a.Tiles[c+0x00] = 0x00
+			a.Tiles[c+0x01] = 0x00
+			a.Tiles[c+0x80] = 0x00
+			a.Tiles[c+0x81] = 0x00
+		}
 	}
 
 	if true {
-		os.WriteFile(
-			fmt.Sprintf("ow%02X.map16", a.AreaID),
-			a.WRAM[0x2000:0x6000],
-			0644,
-		)
 		os.WriteFile(
 			fmt.Sprintf("ow%02X.map8", a.AreaID),
 			(*(*[0x80 * 0x80 * 2]byte)(unsafe.Pointer(&a.Map8[0])))[:],
@@ -242,7 +289,8 @@ func createArea(t T, e *System) (a *Area) {
 }
 
 func (a *Area) overworldFloodFill(q Q, t T) {
-	fmt.Println("TODO: overworldFloodFill")
+	a.Mutex.Lock()
+	defer a.Mutex.Unlock()
 
 	lifo := make([]OWSS, 0, 0x1000)
 	lifo = append(lifo, t.OWStates...)
@@ -265,10 +313,29 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 		canTurn := false
 
 		v := m[c]
-		if a.isAlwaysWalkable(v) {
+		if v == 0x20 {
+			// pit:
+			a.Reachable[c] = v
+		} else if a.isAlwaysWalkable(v) {
 			canTraverse = true
 			canTurn = true
 			a.Reachable[c] = v
+
+			if ent, ok := a.TileEntrance[c]; ok {
+				fmt.Printf("OW$%02X: underworld entrance %02X at %04X\n", a.AreaID, ent.EntranceID, uint16(c))
+				if !ent.Used {
+					ent.Used = true
+					q.SubmitTask(&ReachTask{
+						Mode:            ModeUnderworld,
+						Rooms:           t.Rooms,
+						RoomsLock:       t.RoomsLock,
+						Areas:           t.Areas,
+						AreasLock:       t.AreasLock,
+						InitialEmulator: t.InitialEmulator,
+						EntranceID:      ent.EntranceID,
+					}, ReachTaskFromEntranceWorker)
+				}
+			}
 		}
 
 		if canTraverse {
@@ -284,18 +351,5 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 				lifo = append(lifo, OWSS{c: c, d: d})
 			}
 		}
-	}
-
-	for _, ent := range a.Entrances {
-		// TODO: assume entrances to underworld are reachable
-		q.SubmitTask(&ReachTask{
-			Mode:            ModeUnderworld,
-			Rooms:           t.Rooms,
-			RoomsLock:       t.RoomsLock,
-			Areas:           t.Areas,
-			AreasLock:       t.AreasLock,
-			InitialEmulator: t.InitialEmulator,
-			EntranceID:      ent.EntranceID,
-		}, ReachTaskFromEntranceWorker)
 	}
 }
