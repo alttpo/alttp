@@ -7,6 +7,11 @@ import (
 	"unsafe"
 )
 
+type OWSS struct {
+	c OWCoord
+	d Direction
+}
+
 func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	var err error
 
@@ -80,6 +85,55 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 		return
 	}
 
+	wram := a.WRAM[:]
+
+	ax := read16(wram, 0x070C) << 3
+	ay := read16(wram, 0x0708)
+
+	fmt.Printf(
+		"OW$%02X: area at abs %04X, %04X\n",
+		a.AreaID,
+		ax,
+		ay,
+	)
+
+	fmt.Printf(
+		"OW$%02X: exit at abs %04X, %04X\n",
+		a.AreaID,
+		uint16(t.X),
+		uint16(t.Y),
+	)
+
+	linkX := read16(wram, 0x22)
+	linkY := read16(wram, 0x20)
+	fmt.Printf(
+		"OW$%02X: link at abs %04X, %04X\n",
+		a.AreaID,
+		linkX,
+		linkY,
+	)
+
+	fmt.Printf(
+		"OW$%02X: link at rel %04X, %04X\n",
+		a.AreaID,
+		linkX-ax,
+		linkY-ay,
+	)
+
+	// set up initial scan state at where Link is:
+	se := OWSS{
+		c: OWCoord(((linkY-ay)>>3)<<7 + linkX>>3),
+		d: DirSouth,
+	}
+
+	t.OWStates = append(t.OWStates, se)
+
+	fmt.Printf(
+		"OW$%02X: start %04X\n",
+		a.AreaID,
+		uint16(se.c),
+	)
+
 	a.overworldFloodFill(q, t)
 }
 
@@ -91,15 +145,15 @@ func createArea(t T, e *System) (a *Area) {
 		IsLoaded:        true,
 		Rendered:        nil,
 		RenderedNRGBA:   nil,
-		TilesVisited:    map[MapCoord]struct{}{},
-		Tiles:           [16384]byte{},
-		Reachable:       [16384]byte{},
-		Hookshot:        map[MapCoord]byte{},
-		AllowDirFlags:   [16384]uint8{},
+		TilesVisited:    map[OWCoord]empty{},
+		Tiles:           [0x4000]byte{},
+		Reachable:       [0x4000]byte{},
+		Hookshot:        [0x4000]byte{},
+		AllowDirFlags:   [0x4000]uint8{},
 		e:               e,
 		WRAM:            [131072]byte{},
 		WRAMAfterLoaded: [131072]byte{},
-		VRAMTileSet:     [16384]byte{},
+		VRAMTileSet:     [0x4000]byte{},
 	}
 
 	copy(a.WRAM[:], (*e.WRAM)[:])
@@ -110,6 +164,10 @@ func createArea(t T, e *System) (a *Area) {
 	e.WRAM = &a.WRAM
 
 	wram := (*e.WRAM)[:]
+
+	for i := range a.Reachable {
+		a.Reachable[i] = 0x01
+	}
 
 	// grab area width,height extents in tiles:
 	a.Height = (read16(wram, 0x070A) + 0x10) >> 3
@@ -162,13 +220,6 @@ func createArea(t T, e *System) (a *Area) {
 		fmt.Printf("OW$%02X: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, uint16(ent.OWCoord))
 	}
 
-	fmt.Printf(
-		"OW$%02X: link at %04X, %04X\n",
-		a.AreaID,
-		read16(wram, 0x22),
-		read16(wram, 0x20),
-	)
-
 	if true {
 		os.WriteFile(
 			fmt.Sprintf("ow%02X.map16", a.AreaID),
@@ -187,14 +238,53 @@ func createArea(t T, e *System) (a *Area) {
 		)
 	}
 
-	a.Render()
-	exportPNG(fmt.Sprintf("ow%02X.png", a.AreaID), a.RenderedNRGBA)
-
 	return
 }
 
 func (a *Area) overworldFloodFill(q Q, t T) {
 	fmt.Println("TODO: overworldFloodFill")
+
+	lifo := make([]OWSS, 0, 0x1000)
+	lifo = append(lifo, t.OWStates...)
+
+	m := a.Tiles[:]
+
+	for len(lifo) > 0 {
+		s := lifo[len(lifo)-1]
+		lifo = lifo[:len(lifo)-1]
+
+		c := s.c
+		d := s.d
+
+		if _, ok := a.TilesVisited[c]; ok {
+			continue
+		}
+		a.TilesVisited[c] = empty{}
+
+		canTraverse := false
+		canTurn := false
+
+		v := m[c]
+		if a.isAlwaysWalkable(v) {
+			canTraverse = true
+			canTurn = true
+			a.Reachable[c] = v
+		}
+
+		if canTraverse {
+			if canTurn {
+				if c, d, ok := a.Traverse(c, d.RotateCCW(), 1); ok {
+					lifo = append(lifo, OWSS{c: c, d: d})
+				}
+				if c, d, ok := a.Traverse(c, d.RotateCW(), 1); ok {
+					lifo = append(lifo, OWSS{c: c, d: d})
+				}
+			}
+			if c, d, ok := a.Traverse(c, d, 1); ok {
+				lifo = append(lifo, OWSS{c: c, d: d})
+			}
+		}
+	}
 
 	for _, ent := range a.Entrances {
 		// TODO: assume entrances to underworld are reachable

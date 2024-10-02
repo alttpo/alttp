@@ -502,6 +502,13 @@ func main() {
 		fmt.Println("close")
 		q.Close()
 
+		// areas := make([]*Area, 0, 0x80)
+		for _, a := range areasMap {
+			a.Render()
+			a.DrawOverlays()
+			exportPNG(fmt.Sprintf("ow%02X.png", a.AreaID), a.RenderedNRGBA)
+		}
+
 		rooms := make([]*RoomState, 0, 0x128)
 		for _, room := range roomsMap {
 			rooms = append(rooms, room)
