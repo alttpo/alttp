@@ -48,7 +48,7 @@ type ReachTask struct {
 
 	Rooms     map[uint16]*RoomState
 	RoomsLock *sync.Mutex
-	Areas     map[uint8]*Area
+	Areas     map[AreaID]*Area
 	AreasLock *sync.Mutex
 
 	InitialEmulator *System
@@ -62,7 +62,7 @@ type ReachTask struct {
 	SE SE
 
 	// Overworld:
-	AreaID uint8
+	AreaID AreaID
 	X      uint16
 	Y      uint16
 
@@ -308,7 +308,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 
 		// should only have one custom exit per room:
 		room.OverworldExit = OverworldExit{
-			AreaID: e.Bus.Read8(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 2) + (j)),
+			AreaID: AreaID(e.Bus.Read8(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 2) + (j))),
 			Y:      e.Bus.Read16(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 9) + (j << 1)),
 			X:      e.Bus.Read16(alttp.UnderworldExitData + (alttp.UnderworldExitCount * 11) + (j << 1)),
 			// C is assigned in below loop processing doors

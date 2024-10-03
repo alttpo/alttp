@@ -467,7 +467,7 @@ func main() {
 	if true {
 		roomsMap := make(map[uint16]*RoomState, 0x128)
 		roomsLock := sync.Mutex{}
-		areasMap := make(map[uint8]*Area, 0x80)
+		areasMap := make(map[AreaID]*Area, 0x80)
 		areasLock := sync.Mutex{}
 
 		q := taskqueue.NewQ[*ReachTask](nWorkers, 0x2000)
@@ -506,7 +506,7 @@ func main() {
 		for _, a := range areasMap {
 			a.Render()
 			a.DrawOverlays()
-			exportPNG(fmt.Sprintf("ow%02X.png", a.AreaID), a.RenderedNRGBA)
+			exportPNG(fmt.Sprintf("%s.png", a.AreaID), a.RenderedNRGBA)
 		}
 
 		rooms := make([]*RoomState, 0, 0x128)

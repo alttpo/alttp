@@ -574,7 +574,7 @@ func (ep EntryPoint) String() string {
 }
 
 type OverworldExit struct {
-	AreaID uint8
+	AreaID AreaID
 	Y      uint16
 	X      uint16
 

@@ -25,7 +25,7 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 			panic(err)
 		}
 
-		fmt.Printf("OW$%02X: load\n", t.AreaID)
+		fmt.Printf("%s: load\n", t.AreaID)
 		func() {
 			defer func() {
 				if ex := recover(); ex != nil {
@@ -91,14 +91,14 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	ay := read16(wram, 0x0708)
 
 	fmt.Printf(
-		"OW$%02X: area at abs %04X, %04X\n",
+		"%s: area at abs %04X, %04X\n",
 		a.AreaID,
 		ax,
 		ay,
 	)
 
 	fmt.Printf(
-		"OW$%02X: exit at abs %04X, %04X\n",
+		"%s: exit at abs %04X, %04X\n",
 		a.AreaID,
 		uint16(t.X),
 		uint16(t.Y),
@@ -107,14 +107,14 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	// linkX := read16(wram, 0x22)
 	// linkY := read16(wram, 0x20)
 	// fmt.Printf(
-	// 	"OW$%02X: link at abs %04X, %04X\n",
+	// 	"%s: link at abs %04X, %04X\n",
 	// 	a.AreaID,
 	// 	linkX,
 	// 	linkY,
 	// )
 
 	// fmt.Printf(
-	// 	"OW$%02X: link at rel %04X, %04X\n",
+	// 	"%s: link at rel %04X, %04X\n",
 	// 	a.AreaID,
 	// 	linkX-ax,
 	// 	linkY-ay,
@@ -133,7 +133,7 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	t.OWStates = append(t.OWStates, se)
 
 	fmt.Printf(
-		"OW$%02X: start %04X\n",
+		"%s: start %04X\n",
 		a.AreaID,
 		uint16(se.c),
 	)
@@ -223,8 +223,15 @@ func createArea(t T, e *System) (a *Area) {
 			EntranceID: e.Bus.Read8(alttp.Overworld_EntranceScreens + (ec * 4) + j),
 		}
 		a.Entrances = append(a.Entrances, ent)
+		i := len(a.Entrances) - 1
 
-		fmt.Printf("OW$%02X: entrance at map16=%04X, id=%02X at %04X\n", a.AreaID, m16pos, ent.EntranceID, uint16(ent.OWCoord))
+		fmt.Printf("%s: entrance at map16=%04X, id=%02X at %04X\n", a.AreaID, m16pos, ent.EntranceID, uint16(ent.OWCoord))
+
+		for y := 0; y < 4; y++ {
+			for x := 0; x < 4; x++ {
+				a.TileEntrance[ent.OWCoord+OWCoord(y*0x80)+OWCoord(x)] = &a.Entrances[i]
+			}
+		}
 	}
 
 	// add pit entrances:
@@ -242,18 +249,19 @@ func createArea(t T, e *System) (a *Area) {
 			IsPit:      true,
 		}
 		a.Entrances = append(a.Entrances, ent)
+		i := len(a.Entrances) - 1
 
-		fmt.Printf("OW$%02X: pit entrance at map16=%04X, id=%02X at %04X\n", a.AreaID, m16pos, ent.EntranceID, uint16(ent.OWCoord))
-	}
+		fmt.Printf("%s: pit entrance at map16=%04X, id=%02X at %04X\n", a.AreaID, m16pos, ent.EntranceID, uint16(ent.OWCoord))
 
-	for i, ent := range a.Entrances {
-		fmt.Printf("OW$%02X: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, uint16(ent.OWCoord))
-
-		for y := 0; y < 4; y++ {
-			for x := 0; x < 4; x++ {
+		for y := 0; y < 2; y++ {
+			for x := 0; x < 2; x++ {
 				a.TileEntrance[ent.OWCoord+OWCoord(y*0x80)+OWCoord(x)] = &a.Entrances[i]
 			}
 		}
+	}
+
+	for _, ent := range a.Entrances {
+		fmt.Printf("%s: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, uint16(ent.OWCoord))
 	}
 
 	// open doors:
@@ -339,7 +347,7 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			a.Reachable[c] = v
 
 			if ent, ok := a.TileEntrance[c]; ok {
-				fmt.Printf("OW$%02X: underworld entrance %02X at %04X\n", a.AreaID, ent.EntranceID, uint16(c))
+				fmt.Printf("%s: underworld entrance %02X at %04X\n", a.AreaID, ent.EntranceID, uint16(c))
 				if !ent.Used {
 					ent.Used = true
 					q.SubmitTask(&ReachTask{

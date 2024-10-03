@@ -11,8 +11,14 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+type AreaID uint8
+
+func (a AreaID) String() string {
+	return fmt.Sprintf("OW$%02X", uint8(a))
+}
+
 type Area struct {
-	AreaID uint8
+	AreaID AreaID
 
 	Width  uint16 // width in 8x8 tiles
 	Height uint16 // height in 8x8 tiles
