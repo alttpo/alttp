@@ -212,8 +212,8 @@ func createArea(t T, e *System) (a *Area) {
 	// find all overworld entrances to underworld:
 	ec := alttp.Overworld_EntranceCount
 	for j := uint32(0); j < ec; j++ {
-		aid := e.Bus.Read16(alttp.Overworld_EntranceScreens + j<<1)
-		if aid != uint16(a.AreaID) {
+		aid := AreaID(e.Bus.Read16(alttp.Overworld_EntranceScreens + j<<1))
+		if aid != a.AreaID {
 			continue
 		}
 
@@ -236,8 +236,8 @@ func createArea(t T, e *System) (a *Area) {
 
 	// add pit entrances:
 	for j := uint32(0); j < alttp.Overworld_GetPitDestination_count; j++ {
-		aid := e.Bus.Read16(alttp.Overworld_GetPitDestination_screen + j<<1)
-		if aid != uint16(a.AreaID) {
+		aid := AreaID(e.Bus.Read16(alttp.Overworld_GetPitDestination_screen + j<<1))
+		if aid != a.AreaID {
 			continue
 		}
 
@@ -294,17 +294,17 @@ func createArea(t T, e *System) (a *Area) {
 
 	if true {
 		os.WriteFile(
-			fmt.Sprintf("ow%02X.map16", a.AreaID),
+			fmt.Sprintf("ow%02X.map16", uint8(a.AreaID)),
 			(*(*[0x80 * 0x80]byte)(unsafe.Pointer(&wram[0x2000])))[:],
 			0644,
 		)
 		os.WriteFile(
-			fmt.Sprintf("ow%02X.map8", a.AreaID),
+			fmt.Sprintf("ow%02X.map8", uint8(a.AreaID)),
 			(*(*[0x80 * 0x80 * 2]byte)(unsafe.Pointer(&a.Map8[0])))[:],
 			0644,
 		)
 		os.WriteFile(
-			fmt.Sprintf("ow%02X.tmap", a.AreaID),
+			fmt.Sprintf("ow%02X.tmap", uint8(a.AreaID)),
 			a.Tiles[:],
 			0644,
 		)

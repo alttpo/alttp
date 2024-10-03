@@ -4,7 +4,7 @@ import "fmt"
 
 type Supertile uint16
 
-func (s Supertile) String() string { return fmt.Sprintf("$%03x", uint16(s)) }
+func (s Supertile) String() string { return fmt.Sprintf("UW$%03X", uint16(s)) }
 
 func (s Supertile) MoveBy(dir Direction) (sn Supertile, sd Direction, ok bool) {
 	// don't move within EG2:

@@ -46,7 +46,7 @@ const (
 type ReachTask struct {
 	Mode ReachMode
 
-	Rooms     map[uint16]*RoomState
+	Rooms     map[Supertile]*RoomState
 	RoomsLock *sync.Mutex
 	Areas     map[AreaID]*Area
 	AreasLock *sync.Mutex
@@ -79,7 +79,7 @@ func ReachTaskInterRoom(q Q, t T) {
 	var ok bool
 
 	t.RoomsLock.Lock()
-	if room, ok = t.Rooms[uint16(t.Supertile)]; !ok {
+	if room, ok = t.Rooms[t.Supertile]; !ok {
 		e := &System{}
 		if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
 			panic(err)
@@ -100,7 +100,7 @@ func ReachTaskInterRoom(q Q, t T) {
 		write16(wram, 0xA0, uint16(st))
 		write16(wram, 0x048E, uint16(st))
 
-		fmt.Printf("$%03X: load\n", uint16(st))
+		fmt.Printf("%s: load\n", st)
 		func() {
 			defer func() {
 				if ex := recover(); ex != nil {
@@ -124,7 +124,7 @@ func ReachTaskInterRoom(q Q, t T) {
 
 			room = createRoom(t, e)
 		}()
-		t.Rooms[uint16(t.Supertile)] = room
+		t.Rooms[t.Supertile] = room
 	}
 	t.RoomsLock.Unlock()
 
@@ -166,7 +166,7 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 	// read initial entrance supertile:
 	t.Supertile = Supertile(read16(wram, 0xA0))
 
-	fmt.Printf("entrance $%02X -> $%03X\n", t.EntranceID, uint16(t.Supertile))
+	fmt.Printf("entrance $%02X -> %s\n", t.EntranceID, t.Supertile)
 
 	// find Link's entry point:
 	linkY := read16(wram, 0x0020)
@@ -207,13 +207,13 @@ func getOrCreateRoom(t T, e *System) (room *RoomState) {
 	defer t.RoomsLock.Unlock()
 
 	var ok bool
-	room, ok = t.Rooms[uint16(t.Supertile)]
+	room, ok = t.Rooms[t.Supertile]
 	if ok {
 		return
 	}
 
 	room = createRoom(t, e)
-	t.Rooms[uint16(t.Supertile)] = room
+	t.Rooms[t.Supertile] = room
 
 	return
 }
@@ -264,7 +264,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 	}
 
 	// do first-time room processing work:
-	// fmt.Printf("$%03X: room init\n", uint16(t.Supertile))
+	// fmt.Printf("%s: room init\n", t.Supertile)
 
 	// copy emulator WRAM into room:
 	copy(room.WRAM[:], (*e.WRAM)[:])
@@ -291,7 +291,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 		MapCoord(read8(wram, uint32(0x0640))&2) << 11,
 	}
 
-	os.WriteFile(fmt.Sprintf("r%03X.pre.tmap", uint16(t.Supertile)), tiles, 0644)
+	os.WriteFile(fmt.Sprintf("uw%03X.pre.tmap", uint16(t.Supertile)), tiles, 0644)
 
 	for i := range room.Reachable {
 		room.Reachable[i] = 0x01
@@ -301,8 +301,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 	// note: we don't ever need to exit from underworld back to the same overworld area
 	for j := uint32(0); j < alttp.UnderworldExitCount; j++ {
 		// there should only be one custom overworld exit per underworld room:
-		exitSupertile := e.Bus.Read16(alttp.UnderworldExitData + (j << 1))
-		if exitSupertile != uint16(t.Supertile) {
+		exitSupertile := Supertile(e.Bus.Read16(alttp.UnderworldExitData + (j << 1)))
+		if exitSupertile != t.Supertile {
 			continue
 		}
 
@@ -315,8 +315,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 		}
 		room.HasOverworldExit = true
 		fmt.Printf(
-			"$%03X: overworld exit to %02X at %04X,%04X\n",
-			uint16(t.Supertile),
+			"%s: overworld exit to %s at %04X,%04X\n",
+			t.Supertile,
 			room.OverworldExit.AreaID,
 			room.OverworldExit.X,
 			room.OverworldExit.Y,
@@ -338,7 +338,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 		}
 		room.Doors = append(room.Doors, door)
 
-		fmt.Printf("$%03X: door[%1X] type=%s dir=%s pos=%s\n", uint16(room.Supertile), m>>1, door.Type, door.Dir, door.Pos)
+		fmt.Printf("%s: door[%1X] type=%s dir=%s pos=%s\n", room.Supertile, m>>1, door.Type, door.Dir, door.Pos)
 
 		if door.IsOverworldExit() {
 			// mark the exit door:
@@ -354,7 +354,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 		// special markers are extracted and stuck into the [16]uint16 array at 0x06C0 as
 		// tilemap positions.
 		lsc := MapCoord(read16(wram, 0x06C0+m))
-		fmt.Printf("$%03X: layer swap at %04X\n", uint16(room.Supertile), uint16(lsc))
+		fmt.Printf("%s: layer swap at %04X\n", room.Supertile, uint16(lsc))
 
 		// mark the 2x2 tile as a layer-swap:
 		room.SwapLayers[lsc+0x00] = empty{}
@@ -373,7 +373,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 	exitCount := uint32(read16(wram, 0x19E0))
 	for m := uint32(0); m < exitCount; m += 2 {
 		c := MapCoord(read16(wram, 0x19E2+m) >> 1)
-		fmt.Printf("$%03X: exit door at %04X\n", uint16(room.Supertile), uint16(c))
+		fmt.Printf("%s: exit door at %04X\n", room.Supertile, uint16(c))
 
 		for i := range room.Doors {
 			if room.Doors[i].Pos&0x0FFF == c {
@@ -388,7 +388,7 @@ func createRoom(t T, e *System) (room *RoomState) {
 	}
 
 	if room.HasOverworldExit && room.OverworldExit.Door == nil {
-		fmt.Printf("$%03X: BAD overworld exit - missing door!\n", uint16(t.Supertile))
+		fmt.Printf("%s: BAD overworld exit - missing door!\n", t.Supertile)
 	}
 
 	room.preprocessRoom()
@@ -398,8 +398,8 @@ func createRoom(t T, e *System) (room *RoomState) {
 	// persist the current TilesVisited map in its hash(tiles) slot:
 	room.SwapTilesVisitedMap()
 
-	os.WriteFile(fmt.Sprintf("r%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
-	os.WriteFile(fmt.Sprintf("r%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
+	os.WriteFile(fmt.Sprintf("uw%03X.post.tmap", uint16(t.Supertile)), tiles, 0644)
+	os.WriteFile(fmt.Sprintf("uw%03X.dir.tmap", uint16(t.Supertile)), room.AllowDirFlags[:], 0644)
 
 	return
 }
@@ -449,7 +449,7 @@ func (room *RoomState) preprocessRoom() {
 	// open up doorways:
 	for j := range room.Doors {
 		door := &room.Doors[j]
-		// fmt.Printf("$%03X: door[%1X] type=%s dir=%s pos=%s\n", uint16(room.Supertile), j, door.Type, door.Dir, door.Pos)
+		// fmt.Printf("%s: door[%1X] type=%s dir=%s pos=%s\n", room.Supertile, j, door.Type, door.Dir, door.Pos)
 
 		if door.Type == 0x30 {
 			// exploding wall:
@@ -531,7 +531,7 @@ func (room *RoomState) preprocessRoom() {
 			}
 		}
 
-		//fmt.Printf("$%03X: door type=%s dir=%s pos=%s: %s\n", uint16(room.Supertile), door.Type, door.Dir, door.Pos, dbg.String())
+		//fmt.Printf("%s: door type=%s dir=%s pos=%s: %s\n", room.Supertile, door.Type, door.Dir, door.Pos, dbg.String())
 
 		c, ok = doorwayC, true
 
@@ -631,7 +631,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 		startState := startStates[len(startStates)-1]
 		startStates = startStates[:len(startStates)-1]
 
-		fmt.Printf("$%03X: start=%04X dir=%5s state=%d\n", uint16(t.Supertile), uint16(startState.c), startState.d, startState.s)
+		fmt.Printf("%s: start=%04X dir=%5s state=%d\n", t.Supertile, uint16(startState.c), startState.d, startState.s)
 
 		if startState.s == reachStateStarTiles || startState.s == reachStatePushBlock || startState.s == reachStateKillRoom {
 			// process tags:
@@ -656,14 +656,14 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					}
 				}
 				if killedOne {
-					fmt.Printf("$%03X: kill room\n", uint16(t.Supertile))
+					fmt.Printf("%s: kill room\n", t.Supertile)
 				} else {
 					// nothing killed so no tag to process:
 					continue
 				}
 			}
-			// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
-			// fmt.Printf("$%03X: tags: run; old [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
+			// os.WriteFile(fmt.Sprintf("uw%03X.%08X.tmap", uint16(t.Supertile), room.CalcTilesHash()), tiles, 0644)
+			// fmt.Printf("%s: tags: run; old [04BC]=%02X\n", t.Supertile, wram[0x04BC])
 			room.PlaceLinkAt(startState.c)
 			room.ProcessRoomTags()
 			room.RecalcAllowDirFlags()
@@ -673,9 +673,9 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			// 	for i := range room.TilesVisited {
 			// 		tmp[i] = 0x40
 			// 	}
-			// 	os.WriteFile(fmt.Sprintf("r%03X.%08X.visited.tmap", uint16(t.Supertile), room.CalcTilesHash()), tmp[:], 0644)
+			// 	os.WriteFile(fmt.Sprintf("uw%03X.%08X.visited.tmap", uint16(t.Supertile), room.CalcTilesHash()), tmp[:], 0644)
 			// }
-			// fmt.Printf("$%03X: tags: ran; new [04BC]=%02X\n", uint16(t.Supertile), wram[0x04BC])
+			// fmt.Printf("%s: tags: ran; new [04BC]=%02X\n", t.Supertile, wram[0x04BC])
 
 			startState.s = reachStateWalk
 		} else {
@@ -707,7 +707,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 			canTurn := true
 			traverseDir := se.d
 			traverseBy := 1
-			// fmt.Printf("$%03X: [$%04X]=%02X\n", uint16(st), uint16(se.c), v)
+			// fmt.Printf("%s: [$%04X]=%02X\n", st, uint16(se.c), v)
 
 			if se.s == reachStateSomaria {
 				// somaria:
@@ -864,7 +864,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 							break
 						}
 
-						fmt.Printf("$%03X: edge doorway %04X %s uses door=%04X type=%02X dir=%s\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(door.Pos), uint8(door.Type), door.Dir)
+						fmt.Printf("%s: edge doorway %04X %s uses door=%04X type=%02X dir=%s\n", t.Supertile, uint16(c), traverseDir, uint16(door.Pos), uint8(door.Type), door.Dir)
 						room.Reachable[c] = v
 						room.TilesVisited[c] = empty{}
 
@@ -873,7 +873,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 						{
 							if _, doSwap := room.SwapLayers[c]; doSwap {
 								// swap layers:
-								fmt.Printf("$%03X: edge doorway %04X do layer swap\n", uint16(t.Supertile), uint16(c))
+								fmt.Printf("%s: edge doorway %04X do layer swap\n", t.Supertile, uint16(c))
 								layerSwap = 0x1000
 							}
 						}
@@ -889,7 +889,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 								}
 								if ok {
 									ct := c.OppositeEdge() ^ layerSwap
-									fmt.Printf("$%03X: edge doorway %04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
+									fmt.Printf("%s: edge doorway %04X %s exit to %s at %04X\n", t.Supertile, uint16(c), traverseDir, neighborSt, uint16(ct))
 									pushJob(
 										neighborSt,
 										SE{
@@ -914,7 +914,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 							break
 						}
 
-						fmt.Printf("$%03X: edge doorway %04X %s uses door=%04X type=%02X dir=%s\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(door.Pos), uint8(door.Type), door.Dir)
+						fmt.Printf("%s: edge doorway %04X %s uses door=%04X type=%02X dir=%s\n", t.Supertile, uint16(c), traverseDir, uint16(door.Pos), uint8(door.Type), door.Dir)
 						room.Reachable[c] = v
 						room.TilesVisited[c] = empty{}
 
@@ -927,7 +927,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// custom exits without doors can exist for boss rooms e.g. agahnim 1
 				if room.OverworldExit.Door != nil {
 					if !room.OverworldExit.Used && room.OverworldExit.Door.ContainsCoord(c) {
-						fmt.Printf("$%03X: hit overworld exit\n", uint16(t.Supertile))
+						fmt.Printf("%s: hit overworld exit\n", t.Supertile)
 						room.OverworldExit.Used = true
 						vramCopy := &VRAMArray{}
 						copy(vramCopy[:], room.e.VRAM[:])
@@ -1044,8 +1044,8 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					ct, _, _ := c.MoveBy(traverseDir.Opposite(), 1)
 
 					fmt.Printf(
-						"$%03X: debug stairs at %04X exit=%02X, kind=%02X\n",
-						uint16(t.Supertile),
+						"%s: debug stairs at %04X exit=%02X, kind=%02X\n",
+						t.Supertile,
 						uint16(c),
 						stairExit,
 						stairKind,
@@ -1139,7 +1139,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 						ct = ct&0x0FFF | room.StairTargetLayer[stairExit&3]
 					}
 
-					fmt.Printf("$%03X: stairs $%04X exit to $%03X at $%04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
+					fmt.Printf("%s: stairs $%04X exit to %s at $%04X\n", t.Supertile, uint16(c), neighborSt, uint16(ct))
 					pushJob(
 						neighborSt,
 						SE{
@@ -1202,7 +1202,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					room.Reachable[c] = v
 					room.TilesVisited[c] = empty{}
 
-					fmt.Printf("$%03X: water stairs at %04X %s\n", uint16(t.Supertile), uint16(c), se.d)
+					fmt.Printf("%s: water stairs at %04X %s\n", t.Supertile, uint16(c), se.d)
 					c, _, ok = c.MoveBy(se.d, 1)
 				}
 				if ok {
@@ -1215,7 +1215,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					canTurn = true
 				} else {
 					// transition from layer 1 to layer 2:
-					fmt.Printf("$%03X: fall to layer 2 at $%04X\n", uint16(t.Supertile), uint16(c))
+					fmt.Printf("%s: fall to layer 2 at $%04X\n", t.Supertile, uint16(c))
 					lifo = append(lifo, SE{c: c | 0x1000, d: traverseDir, s: se.s})
 				}
 			} else if v == 0x20 || v == 0x62 {
@@ -1226,7 +1226,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 					// exit via pit:
 					neighborSt := room.WarpExitTo
 					ct := c&0x0FFF | room.WarpExitLayer
-					fmt.Printf("$%03X: pit $%04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
+					fmt.Printf("%s: pit $%04X %s exit to %s at %04X\n", t.Supertile, uint16(c), traverseDir, neighborSt, uint16(ct))
 					pushJob(
 						neighborSt,
 						SE{
@@ -1320,7 +1320,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 						ct, _, _ = ct.MoveBy(d.Opposite(), 2)
 						if room.isAlwaysWalkable(tiles[ct]) {
 							if _, ok := room.TilesVisited[ct]; !ok {
-								fmt.Printf("$%03X: hook %s at $%04X to %04X\n", uint16(t.Supertile), d, uint16(c), uint16(ct))
+								fmt.Printf("%s: hook %s at $%04X to %04X\n", t.Supertile, d, uint16(c), uint16(ct))
 								lifo = append(lifo, SE{c: ct, d: d, s: se.s})
 
 								// mark tiles as hookable:
@@ -1348,7 +1348,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// 3B - active star tile
 				canTraverse = true
 				canTurn = true
-				fmt.Printf("$%03X: star at $%04X\n", uint16(t.Supertile), uint16(c))
+				fmt.Printf("%s: star at $%04X\n", t.Supertile, uint16(c))
 				// make a WRAM copy to resume from:
 				wramCopy := new(WRAMArray)
 				copy((*wramCopy)[:], room.WRAM[:])
@@ -1358,7 +1358,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				// 4B - warp tile
 				neighborSt := room.WarpExitTo
 				ct := c | room.WarpExitLayer
-				fmt.Printf("$%03X: warp $%04X exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), uint16(neighborSt), uint16(ct))
+				fmt.Printf("%s: warp $%04X exit to %s at %04X\n", t.Supertile, uint16(c), neighborSt, uint16(ct))
 				pushJob(
 					neighborSt,
 					SE{
@@ -1383,7 +1383,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 
 					// grab map16 position from $0540[v&0xF<<1]
 					m16p := read16(wram, 0x0540+j)
-					fmt.Printf("$%03X: manip at %04X\n", uint16(t.Supertile), m16p)
+					fmt.Printf("%s: manip at %04X\n", t.Supertile, m16p)
 
 					// check RoomData_PotItems_Pointers:#_01DB67 for room to see what to replace with
 					// list of dw RoomData_PotItems_Room0xxx
@@ -1466,7 +1466,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 							break
 						}
 						if canBonk && hasPit {
-							fmt.Printf("$%03X: pit bonk skip %s at $%04X off %02X\n", uint16(t.Supertile), d, uint16(c), v)
+							fmt.Printf("%s: pit bonk skip %s at $%04X off %02X\n", t.Supertile, d, uint16(c), v)
 							lifo = append(lifo, SE{c: ct, d: d, s: se.s})
 						}
 					}
@@ -1484,7 +1484,7 @@ func reachTaskFloodfill(q Q, t T, room *RoomState) {
 				if traverseDir == edgeDir && room.CanTraverseDir(c, traverseDir) {
 					if neighborSt, _, ok := st.MoveBy(traverseDir); ok {
 						ct := c.OppositeEdge() ^ layerSwap
-						fmt.Printf("$%03X: edge $%04X %s exit to $%03X at %04X\n", uint16(t.Supertile), uint16(c), traverseDir, uint16(neighborSt), uint16(ct))
+						fmt.Printf("%s: edge $%04X %s exit to %s at %04X\n", t.Supertile, uint16(c), traverseDir, neighborSt, uint16(ct))
 						pushJob(
 							neighborSt,
 							SE{
@@ -1701,7 +1701,7 @@ func (r *RoomState) ProcessRoomTags() {
 	// if no tags present, don't check them:
 	oldAE, oldAF := read8(wram, 0xAE), read8(wram, 0xAF)
 	if oldAE == 0 && oldAF == 0 {
-		fmt.Printf("$%03X: tags: no tags to activate\n", uint16(r.Supertile))
+		fmt.Printf("%s: tags: no tags to activate\n", r.Supertile)
 		return
 	}
 
@@ -1739,8 +1739,8 @@ func (room *RoomState) CalcTilesHash() (tilesHash uint64) {
 
 func (room *RoomState) SwapTilesVisitedMap() {
 	tilesHash := room.CalcTilesHash()
-	// fmt.Printf("$%03X: tiles hash=%08X\n", uint16(room.Supertile), tilesHash)
-	// os.WriteFile(fmt.Sprintf("r%03X.%08X.tmap", uint16(room.Supertile), tilesHash), room.WRAM[0x12000:0x14000], 0644)
+	// fmt.Printf("%s: tiles hash=%08X\n", room.Supertile, tilesHash)
+	// os.WriteFile(fmt.Sprintf("uw%03X.%08X.tmap", uint16(room.Supertile), tilesHash), room.WRAM[0x12000:0x14000], 0644)
 
 	if m, ok := room.TilesVisitedHash[tilesHash]; ok {
 		room.TilesVisited = m
@@ -1754,7 +1754,7 @@ func (room *RoomState) SwapTilesVisitedMap() {
 	if false {
 		g := image.NewNRGBA(image.Rect(0, 0, 512, 512))
 		room.renderToNonPaletted(g)
-		exportPNG(fmt.Sprintf("r%03X.%08X.png", uint16(room.Supertile), tilesHash), g)
+		exportPNG(fmt.Sprintf("uw%03X.%08X.png", uint16(room.Supertile), tilesHash), g)
 	}
 }
 

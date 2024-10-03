@@ -586,7 +586,7 @@ type OverworldExit struct {
 type RoomState struct {
 	Mutex sync.Mutex
 
-	Supertile
+	Supertile Supertile
 
 	Entrance *Entrance
 

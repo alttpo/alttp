@@ -465,7 +465,7 @@ func main() {
 
 	// run jobs starting from entrances:
 	if true {
-		roomsMap := make(map[uint16]*RoomState, 0x128)
+		roomsMap := make(map[Supertile]*RoomState, 0x128)
 		roomsLock := sync.Mutex{}
 		areasMap := make(map[AreaID]*Area, 0x80)
 		areasLock := sync.Mutex{}
@@ -506,7 +506,7 @@ func main() {
 		for _, a := range areasMap {
 			a.Render()
 			a.DrawOverlays()
-			exportPNG(fmt.Sprintf("%s.png", a.AreaID), a.RenderedNRGBA)
+			exportPNG(fmt.Sprintf("ow%02X.png", uint8(a.AreaID)), a.RenderedNRGBA)
 		}
 
 		rooms := make([]*RoomState, 0, 0x128)
@@ -603,7 +603,7 @@ func main() {
 		dbg := strings.Builder{}
 		for _, room := range rooms {
 			if room.HasReachablePit {
-				fmt.Fprintf(&dbg, ",$%03X", uint16(room.Supertile))
+				fmt.Fprintf(&dbg, ",%s", room.Supertile)
 			}
 		}
 		fmt.Printf("rooms with enemy-reachable pits: %s\n", dbg.String()[1:])

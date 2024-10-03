@@ -753,7 +753,7 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 
 		// determine if in bounds:
 		x, y := getXY(i, wram)
-		if !room.IsAbsInBounds(x, y) {
+		if !room.Supertile.IsAbsInBounds(x, y) {
 			continue
 		}
 
@@ -877,7 +877,7 @@ func (room *RoomState) DrawSpriteHitboxes(g draw.Image) {
 
 					// determine if in bounds:
 					x, y := getXY(i, wram)
-					if !room.IsAbsInBounds(x, y) {
+					if !room.Supertile.IsAbsInBounds(x, y) {
 						return true
 					}
 
@@ -1253,7 +1253,7 @@ func (room *RoomState) RenderSpriteHitBoxes(g draw.Image) {
 		xl, xh := read8(wram, 0x0D10+i), read8(wram, 0x0D30+i)
 		y := uint16(yl) | uint16(yh)<<8
 		x := uint16(xl) | uint16(xh)<<8
-		if !room.IsAbsInBounds(x, y) {
+		if !room.Supertile.IsAbsInBounds(x, y) {
 			continue
 		}
 
