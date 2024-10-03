@@ -217,17 +217,41 @@ func createArea(t T, e *System) (a *Area) {
 			continue
 		}
 
+		m16pos := e.Bus.Read16(alttp.Overworld_EntranceScreens + (ec * 2) + j<<1)
 		ent := AreaEntrance{
-			OWCoord:    Map16ToOWCoord(e.Bus.Read16(alttp.Overworld_EntranceScreens + (ec * 2) + j<<1)),
+			OWCoord:    Map16ToOWCoord(m16pos),
 			EntranceID: e.Bus.Read8(alttp.Overworld_EntranceScreens + (ec * 4) + j),
 		}
 		a.Entrances = append(a.Entrances, ent)
 
+		fmt.Printf("OW$%02X: entrance at map16=%04X, id=%02X at %04X\n", a.AreaID, m16pos, ent.EntranceID, uint16(ent.OWCoord))
+	}
+
+	// add pit entrances:
+	for j := uint32(0); j < alttp.Overworld_GetPitDestination_count; j++ {
+		aid := e.Bus.Read16(alttp.Overworld_GetPitDestination_screen + j<<1)
+		if aid != uint16(a.AreaID) {
+			continue
+		}
+
+		// i don't understand the reason for the 0x400 fudge factor but it's definitely needed.
+		m16pos := e.Bus.Read16(alttp.Overworld_GetPitDestination_map16+j<<1) + 0x400
+		ent := AreaEntrance{
+			OWCoord:    OWCoord((m16pos & 0x7F) | ((m16pos >> 7) << 8)),
+			EntranceID: e.Bus.Read8(alttp.Overworld_GetPitDestination_entrance + j),
+			IsPit:      true,
+		}
+		a.Entrances = append(a.Entrances, ent)
+
+		fmt.Printf("OW$%02X: pit entrance at map16=%04X, id=%02X at %04X\n", a.AreaID, m16pos, ent.EntranceID, uint16(ent.OWCoord))
+	}
+
+	for i, ent := range a.Entrances {
 		fmt.Printf("OW$%02X: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, uint16(ent.OWCoord))
 
 		for y := 0; y < 4; y++ {
 			for x := 0; x < 4; x++ {
-				a.TileEntrance[ent.OWCoord+OWCoord(y*0x80)+OWCoord(x)] = &a.Entrances[len(a.Entrances)-1]
+				a.TileEntrance[ent.OWCoord+OWCoord(y*0x80)+OWCoord(x)] = &a.Entrances[i]
 			}
 		}
 	}
@@ -250,29 +274,22 @@ func createArea(t T, e *System) (a *Area) {
 		if v0 == 0x0148 && v1 == 0x0149 && v2 == 0x4149 && v3 == 0x4148 {
 			// 1D48 1D49 5D49 5D48
 			// open castle door:
-			a.Tiles[c+0x000] = 0x00
-			a.Tiles[c+0x001] = 0x00
-			a.Tiles[c+0x002] = 0x00
-			a.Tiles[c+0x003] = 0x00
-			a.Tiles[c+0x080] = 0x00
-			a.Tiles[c+0x081] = 0x00
-			a.Tiles[c+0x082] = 0x00
-			a.Tiles[c+0x083] = 0x00
-			a.Tiles[c+0x100] = 0x00
-			a.Tiles[c+0x101] = 0x00
-			a.Tiles[c+0x102] = 0x00
-			a.Tiles[c+0x103] = 0x00
+			a.ClearMap8Tile(c + 0x000)
+			a.ClearMap8Tile(c + 0x080)
+			a.ClearMap8Tile(c + 0x100)
 		}
 		if v0 == 0x00E9 && v1 == 0x40E9 {
 			// at top of regular door: (e.g. village house)
-			a.Tiles[c+0x00] = 0x00
-			a.Tiles[c+0x01] = 0x00
-			a.Tiles[c+0x80] = 0x00
-			a.Tiles[c+0x81] = 0x00
+			a.ClearMap8Tile(c)
 		}
 	}
 
 	if true {
+		os.WriteFile(
+			fmt.Sprintf("ow%02X.map16", a.AreaID),
+			(*(*[0x80 * 0x80]byte)(unsafe.Pointer(&wram[0x2000])))[:],
+			0644,
+		)
 		os.WriteFile(
 			fmt.Sprintf("ow%02X.map8", a.AreaID),
 			(*(*[0x80 * 0x80 * 2]byte)(unsafe.Pointer(&a.Map8[0])))[:],

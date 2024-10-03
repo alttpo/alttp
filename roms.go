@@ -53,6 +53,11 @@ type romPointers struct {
 	Overworld_EntranceScreens   uint32 // 0x1B_B96F
 	Overworld_EntranceTileIndex uint32 // 0x1B_BA71
 
+	Overworld_GetPitDestination_count    uint32 // 0x13
+	Overworld_GetPitDestination_map16    uint32 // 0x1B_B800
+	Overworld_GetPitDestination_screen   uint32 // 0x1B_B826
+	Overworld_GetPitDestination_entrance uint32 // 0x1B_B84C
+
 	SpriteHitBox_OffsetXLow  uint32
 	SpriteHitBox_OffsetXHigh uint32
 	SpriteHitBox_Width       uint32
@@ -103,6 +108,11 @@ var alttpJP10 = romPointers{
 	Overworld_EntranceCount:     0x81,
 	Overworld_EntranceScreens:   0x1B_B96F,
 	Overworld_EntranceTileIndex: 0x1B_BA71,
+
+	Overworld_GetPitDestination_count:    0x13,
+	Overworld_GetPitDestination_map16:    0x1B_B800,
+	Overworld_GetPitDestination_screen:   0x1B_B826,
+	Overworld_GetPitDestination_entrance: 0x1B_B84C,
 
 	SpriteHitBox_OffsetXLow:  0x06_F735,
 	SpriteHitBox_OffsetXHigh: 0x06_F735 + 0x20,
@@ -156,6 +166,11 @@ var alttpUS = romPointers{
 	Overworld_EntranceCount:     0x81,      // confirmed
 	Overworld_EntranceScreens:   0x1B_B96F, // confirmed
 	Overworld_EntranceTileIndex: 0x1B_BA71, // confirmed
+
+	Overworld_GetPitDestination_count:    0x13,      // confirmed
+	Overworld_GetPitDestination_map16:    0x1B_B800, // confirmed
+	Overworld_GetPitDestination_screen:   0x1B_B826, // confirmed
+	Overworld_GetPitDestination_entrance: 0x1B_B84C, // confirmed
 
 	SpriteHitBox_OffsetXLow:  0x06_F72F, // confirmed
 	SpriteHitBox_OffsetXHigh: 0x06_F72F + 0x20,

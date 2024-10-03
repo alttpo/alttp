@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"sync"
 	"unsafe"
 
 	"golang.org/x/image/draw"
+	"golang.org/x/image/math/fixed"
 )
 
 type Area struct {
@@ -45,7 +47,15 @@ type Area struct {
 type AreaEntrance struct {
 	OWCoord    OWCoord
 	EntranceID uint8
+	IsPit      bool
 	Used       bool
+}
+
+func (a *Area) ClearMap8Tile(c OWCoord) {
+	a.Tiles[c+0x000] = 0x00
+	a.Tiles[c+0x001] = 0x00
+	a.Tiles[c+0x002] = 0x00
+	a.Tiles[c+0x003] = 0x00
 }
 
 func (a *Area) RowCol(c OWCoord) (row, col int) {
@@ -222,6 +232,42 @@ func (a *Area) DrawOverlays() {
 			overlay,
 			image.Point{},
 			draw.Over,
+		)
+	}
+
+	// yellow boxes around entrances:
+	yellowTint := image.NewUniform(color.NRGBA{255, 255, 0, 192})
+	for _, ent := range a.Entrances {
+		row, col := a.RowCol(ent.OWCoord)
+		wh := 4
+		if ent.IsPit {
+			wh = 2
+		}
+
+		drawShadowedString(
+			a.RenderedNRGBA,
+			yellowTint,
+			fixed.Point26_6{
+				X: fixed.I(int(col*8) + (wh-2)*4),
+				Y: fixed.I(int(row*8) - 2),
+			},
+			fmt.Sprintf("%02X", uint8(ent.EntranceID)),
+		)
+		drawOutlineBox(
+			a.RenderedNRGBA,
+			yellowTint,
+			col*8,
+			row*8,
+			8*wh,
+			8*wh,
+		)
+		drawOutlineBox(
+			a.RenderedNRGBA,
+			yellowTint,
+			col*8-1,
+			row*8-1,
+			8*wh+2,
+			8*wh+2,
 		)
 	}
 }
