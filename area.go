@@ -39,9 +39,15 @@ type Area struct {
 	Hookshot      [0x4000]uint8
 	AllowDirFlags [0x4000]uint8
 
-	e               *System
-	WRAM            [0x20000]byte
+	// live emulator with its associated dynamic WRAM:
+	// these CANNOT be safely used concurrently
+	e    *System
+	WRAM [0x20000]byte
+
+	// static initial copies of WRAM and VRAM after loading the area:
+	// these can be safely READ from concurrently AFTER area construction
 	WRAMAfterLoaded [0x20000]byte
+	VRAMAfterLoaded [0x10000]byte
 	VRAMTileSet     [0x4000]byte
 
 	Entrances    []AreaEntrance
@@ -55,13 +61,6 @@ type AreaEntrance struct {
 	EntranceID uint8
 	IsPit      bool
 	Used       bool
-}
-
-func (a *Area) ClearMap8Tile(c OWCoord) {
-	a.Tiles[c+0x000] = 0x00
-	a.Tiles[c+0x001] = 0x00
-	a.Tiles[c+0x002] = 0x00
-	a.Tiles[c+0x003] = 0x00
 }
 
 func (a *Area) RowCol(c OWCoord) (row, col int) {

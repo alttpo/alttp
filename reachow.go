@@ -163,6 +163,7 @@ func createArea(t T, e *System) (a *Area) {
 
 	copy(a.WRAM[:], (*e.WRAM)[:])
 	copy(a.WRAMAfterLoaded[:], (*e.WRAM)[:])
+	copy(a.VRAMAfterLoaded[:], (*e.VRAM)[:])
 	copy(a.VRAMTileSet[:], (*e.VRAM)[0x4000:0x8000])
 
 	// point emulator WRAM at Area's copy:
@@ -264,33 +265,56 @@ func createArea(t T, e *System) (a *Area) {
 		fmt.Printf("%s: entrance id=%02X at %04X\n", a.AreaID, ent.EntranceID, uint16(ent.OWCoord))
 	}
 
-	// open doors:
 	for i := range a.Map8 {
 		c := OWCoord(i)
 		row, col := a.RowCol(c)
-		if col >= int(a.Width)-3 {
+		if col >= int(a.Width)-4 {
 			continue
 		}
 		if row >= int(a.Height)-4 {
 			continue
 		}
 
-		v0 := a.Map8[c+0] & 0x41FF
-		v1 := a.Map8[c+1] & 0x41FF
-		v2 := a.Map8[c+2] & 0x41FF
-		v3 := a.Map8[c+3] & 0x41FF
-		if v0 == 0x0148 && v1 == 0x0149 && v2 == 0x4149 && v3 == 0x4148 {
+		// open doors:
+		v00 := a.Map8[c+0] & 0x41FF
+		v01 := a.Map8[c+1] & 0x41FF
+		v02 := a.Map8[c+2] & 0x41FF
+		v03 := a.Map8[c+3] & 0x41FF
+		if v00 == 0x0148 && v01 == 0x0149 && v02 == 0x4149 && v03 == 0x4148 {
 			// 1D48 1D49 5D49 5D48
 			// open castle door:
-			a.ClearMap8Tile(c + 0x000)
-			a.ClearMap8Tile(c + 0x080)
-			a.ClearMap8Tile(c + 0x100)
+			for j := 0; j < 4; j++ {
+				a.Tiles[c+0x000+OWCoord(j)] = 0x00
+				a.Tiles[c+0x080+OWCoord(j)] = 0x00
+				a.Tiles[c+0x100+OWCoord(j)] = 0x00
+			}
 		}
-		if v0 == 0x00E9 && v1 == 0x40E9 {
+		if v00 == 0x00E8 && v01 == 0x00E9 && v02 == 0x40E9 && v03 == 0x40E8 {
+			// 08E8 08E9 48E9 48E8
 			// at top of regular door: (e.g. village house)
-			a.ClearMap8Tile(c)
+			for j := 0; j < 2; j++ {
+				a.Tiles[c+0x001+OWCoord(j)] = 0x00
+				a.Tiles[c+0x081+OWCoord(j)] = 0x00
+			}
+		}
+
+		// convert hammer pegs:
+		v10 := a.Map8[c+0x80] & 0x41FF
+		v11 := a.Map8[c+0x81] & 0x41FF
+		// 19A0 59A0
+		// 19B0 59B0
+		if v00 == 0x01A0 && v01 == 0x41A0 && v10 == 0x01B0 && v11 == 0x41B0 {
+			for j := 0; j < 2; j++ {
+				a.Tiles[c+0x000+OWCoord(j)] = 0x70
+				a.Tiles[c+0x080+OWCoord(j)] = 0x70
+			}
 		}
 	}
+	// TODO: open GT stairs
+	// TODO: open TR entrance
+	// TODO: open MM entrance
+	// TODO: open TT entrance
+	// TODO: why no entrance 0A for DP??
 
 	if true {
 		os.WriteFile(
@@ -322,6 +346,8 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 
 	m := a.Tiles[:]
 
+	edges := [4][]OWSS{}
+
 	for len(lifo) > 0 {
 		s := lifo[len(lifo)-1]
 		lifo = lifo[:len(lifo)-1]
@@ -340,6 +366,11 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 		v := m[c]
 		if v == 0x20 {
 			// pit:
+			a.Reachable[c] = v
+		} else if v == 0x52 || v == 0x53 {
+			// gray rock and black rock:
+			canTraverse = true
+			canTurn = true
 			a.Reachable[c] = v
 		} else if a.isAlwaysWalkable(v) {
 			canTraverse = true
@@ -363,6 +394,11 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			}
 		}
 
+		// TODO: edge transitions
+		// TODO: large rocks
+		// TODO: deep water
+		// TODO: mirroring between LW and DW
+
 		if canTraverse {
 			if canTurn {
 				if c, d, ok := a.Traverse(c, d.RotateCCW(), 1); ok {
@@ -374,6 +410,28 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			}
 			if c, d, ok := a.Traverse(c, d, 1); ok {
 				lifo = append(lifo, OWSS{c: c, d: d})
+			}
+		}
+	}
+
+	if false {
+		for d := range edges {
+			s := edges[d]
+			if len(s) > 0 {
+				q.SubmitTask(&ReachTask{
+					Mode:            ModeOverworld,
+					Rooms:           t.Rooms,
+					RoomsLock:       t.RoomsLock,
+					Areas:           t.Areas,
+					AreasLock:       t.AreasLock,
+					InitialEmulator: t.InitialEmulator,
+
+					EntranceWRAM: &a.WRAMAfterLoaded,
+					EntranceVRAM: &a.VRAMAfterLoaded,
+
+					AreaID:   a.AreaID,
+					OWStates: s,
+				}, ReachTaskOverworldFromUnderworldWorker)
 			}
 		}
 	}
