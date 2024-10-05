@@ -60,6 +60,9 @@ type romPointers struct {
 
 	Overworld_ActualScreenID uint32 // 0x02_A4E3
 
+	Overworld_LoadGFXAndScreenSize             uint32 // 0x02_AA07
+	OverworldHandleTransitions_change_palettes uint32 // 0x02_A9F3
+
 	SpriteHitBox_OffsetXLow  uint32
 	SpriteHitBox_OffsetXHigh uint32
 	SpriteHitBox_Width       uint32
@@ -117,6 +120,9 @@ var alttpJP10 = romPointers{
 	Overworld_GetPitDestination_entrance: 0x1B_B84C,
 
 	Overworld_ActualScreenID: 0x02_A4E3,
+
+	Overworld_LoadGFXAndScreenSize:             0x02_AA07,
+	OverworldHandleTransitions_change_palettes: 0x02_A9F3,
 
 	SpriteHitBox_OffsetXLow:  0x06_F735,
 	SpriteHitBox_OffsetXHigh: 0x06_F735 + 0x20,
@@ -177,6 +183,9 @@ var alttpUS = romPointers{
 	Overworld_GetPitDestination_entrance: 0x1B_B84C, // confirmed
 
 	Overworld_ActualScreenID: 0x02_A5EC, // confirmed
+
+	Overworld_LoadGFXAndScreenSize:             0x02_AB08, // confirmed
+	OverworldHandleTransitions_change_palettes: 0x02_AAF4, // confirmed
 
 	SpriteHitBox_OffsetXLow:  0x06_F72F, // confirmed
 	SpriteHitBox_OffsetXHigh: 0x06_F72F + 0x20,

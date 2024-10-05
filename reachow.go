@@ -169,14 +169,21 @@ func ReachTaskOverworldWorker(q Q, t T) {
 			// 	e.LoggerCPU = os.Stdout
 			// }
 
-			// set the AreaID to load:
+			// set the AreaID to load and direction to transition from:
 			write8(wram, 0x8A, uint8(t.AreaID))
-			if err = e.ExecAt(loadOverworldPC, donePC); err != nil {
+			write8(wram, 0x040A, uint8(t.AreaID))
+			db := uint8(1 << (3 - t.OWSS.d))
+			write8(wram, 0x0410, db)
+			write8(wram, 0x0416, db)
+			write8(wram, 0x0418, uint8(t.OWSS.d))
+			write8(wram, 0x069C, uint8(t.OWSS.d))
+			if err = e.ExecAt(b02LoadOverworldTransitionPC, donePC); err != nil {
 				panic(err)
 			}
+
 			// run frames until back to module $09:
 			for i := 0; i < 256; i++ {
-				if err = e.ExecAt(runFramePC, donePC); err != nil {
+				if err = e.ExecAt(b00RunSingleFramePC, donePC); err != nil {
 					panic(err)
 				}
 

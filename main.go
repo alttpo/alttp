@@ -33,6 +33,7 @@ var (
 	b01LoadAndDrawRoomSetSupertilePC uint32
 	b00HandleRoomTagsPC              uint32 = 0x00_5300
 	b00RunSingleFramePC              uint32 = 0x00_5400
+	b02LoadOverworldTransitionPC     uint32 = 0x02_5500
 
 	loadExitPC         uint32
 	setExitSupertilePC uint32
@@ -1431,6 +1432,7 @@ func setupAlttp(e *System) {
 	b01LoadAndDrawRoomPC |= fastRomBank
 	b01LoadAndDrawRoomSetSupertilePC |= fastRomBank
 	b02LoadUnderworldSupertilePC |= fastRomBank
+	b02LoadOverworldTransitionPC |= fastRomBank
 
 	// NOTE: appears unused
 	{
@@ -1548,51 +1550,8 @@ func setupAlttp(e *System) {
 		// non-zero mirroring to skip message prompt on file load:
 		a.STA_long(0x7EC011)
 
-		//a.BRA("mainRouting")
+		// STOP:
 		a.STP()
-		//a.BRA("loadEntrance")
-
-		// load an overworld from an underworld exit:
-		loadExitPC = a.Label("loadExit")
-		a.REP(0x30)
-		setExitSupertilePC = a.Label("setExitSupertile") + 1
-		// set underworld supertile ID we're exiting from:
-		a.LDA_imm16_w(0x0012)
-		a.STA_dp(0xA0)
-
-		// transition to overworld:
-		loadOverworldPC = a.Label("loadOverworld")
-		a.SEP(0x30)
-		a.LDA_imm8_b(0x08)
-		a.STA_abs(0x010C)
-		a.STA_dp(0x10)
-		a.STZ_dp(0x11)
-		a.STZ_dp(0xB0)
-		// DeleteCertainAncillaeStopDashing#_028A0E
-		a.Comment("DeleteCertainAncillaeStopDashing")
-		// Ancilla_TerminateSelectInteractives#_09AC57
-		a.JSL(fastRomBank | alttp.Ancilla_TerminateSelectInteractives)
-		a.LDA_abs(0x0372)
-		a.BEQ("mainRouting")
-
-		a.STZ_dp(0x4D)
-		a.STZ_dp(0x46)
-
-		a.LDA_imm8_b(0xFF)
-		a.STA_dp(0x29)
-		a.STA_dp(0xC7)
-
-		a.STZ_dp(0x3D)
-		a.STZ_dp(0x5E)
-
-		a.STZ_abs(0x032B)
-		a.STZ_abs(0x0372)
-
-		//#_028A2B: LDA.b #$00 ; LINKSTATE 00
-		a.LDA_imm8_b(0x00)
-		//#_028A2D: STA.b $5D
-		a.STA_dp(0x5D)
-		a.BRA("mainRouting")
 
 		// loads a dungeon given an entrance ID:
 		loadEntrancePC = a.Label("loadEntrance")
@@ -1774,6 +1733,41 @@ func setupAlttp(e *System) {
 		if err = a.Finalize(); err != nil {
 			panic(err)
 		}
+		a.WriteTextTo(e.Logger)
+	}
+
+	// this routine loads an overworld area from edge transition:
+	{
+		// emit into our custom routine:
+		a = asm.NewEmitter(e.HWIO.Dyn[b02LoadOverworldTransitionPC&0xFFFF-0x5000:], true)
+		a.SetBase(b02LoadOverworldTransitionPC)
+
+		// make sure we're in the right module, submodule:
+		a.SEP(0x30)
+		a.LDA_imm8_b(0x09)
+		a.STA_abs(0x010C)
+		a.STA_dp(0x10)
+		a.STZ_dp(0x11)
+		a.INC_dp(0x11)
+		a.STZ_dp(0xB0)
+
+		// NOTE: we cannot simply JMP to dont_fade_song_b because it has a PLA and RTS.
+
+		// $0410 and $0416 must contain direction as single bit in lower 4 bits
+		// $0418 and $069C must contain transition direction as enum value
+
+		a.STZ_abs(0x0696)
+		a.STZ_abs(0x0698)
+		a.STZ_abs(0x0126)
+
+		// Overworld_LoadGFXAndScreenSize#_02AA07
+		a.JSR_abs(uint16(alttp.Overworld_LoadGFXAndScreenSize & 0xFFFF))
+		// OverworldHandleTransitions.change_palettes#_02A9F3
+		a.JSR_abs(uint16(alttp.OverworldHandleTransitions_change_palettes & 0xFFFF))
+		a.STP()
+
+		// next, caller must execute MainRouting until submodule goes back to #$00.
+
 		a.WriteTextTo(e.Logger)
 	}
 
