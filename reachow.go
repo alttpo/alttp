@@ -12,6 +12,12 @@ type OWSS struct {
 	d Direction
 }
 
+type OWEdge struct {
+	fromX int
+	fromY int
+	d     Direction
+}
+
 func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	var err error
 
@@ -250,8 +256,33 @@ func ReachTaskOverworldWorker(q Q, t T) {
 	// 	d: DirSouth,
 	// }
 
-	for _, se := range t.OWEdges {
-		t.OWSS = se
+	for _, ed := range t.OWEdges {
+		// adjust start position to fit area:
+		row, col := ed.fromY, ed.fromX
+		// TODO: move this to NeighborEdge
+		switch ed.d {
+		case DirNorth:
+			row -= 1
+		case DirSouth:
+			row += 1
+		case DirWest:
+			col -= 1
+		case DirEast:
+			col += 1
+		}
+
+		// offset from area top-left:
+		arow, acol := a.AreaID.RowCol()
+		col -= (acol * 0x40)
+		row -= (arow * 0x40)
+
+		// adjust to size:
+		col &= a.Width - 1
+		row &= a.Height - 1
+
+		t.OWSS.c = RowColToOWCoord(row, col)
+		t.OWSS.d = ed.d
+
 		a.overworldFloodFill(q, t)
 	}
 }
@@ -468,12 +499,7 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 
 	m := a.Tiles[:]
 
-	type edge struct {
-		a AreaID
-		s OWSS
-	}
-
-	areaEdges := map[AreaID][]OWSS{}
+	areaEdges := map[AreaID][]OWEdge{}
 
 	for len(lifo) > 0 {
 		s := lifo[len(lifo)-1]
@@ -530,9 +556,11 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 		a.Reachable[c] = v
 
 		// transition to neighboring area at the edges:
-		if _, ct, na, ok := a.NeighborEdge(c, d); ok {
-			fmt.Printf("%s: edge $%04X %s exit to %s at %04X\n", t.AreaID, uint16(c), d, na, uint16(ct))
-			areaEdges[na] = append(areaEdges[na], OWSS{c: ct, d: d})
+		if _, nda, ok := a.NeighborEdge(c, d); ok {
+			absX, absY := a.AbsXY(c)
+			na := a.CorrectAreaID(nda)
+			fmt.Printf("%s: edge $%04X %s exit to %s from (%03X,%03X)\n", t.AreaID, uint16(c), d, na, absX, absY)
+			areaEdges[na] = append(areaEdges[na], OWEdge{fromX: absX, fromY: absY, d: d})
 			continue
 		}
 
@@ -552,6 +580,7 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 	// submit one task for each area-edge pair:
 	for na, el := range areaEdges {
 		fmt.Printf("%s: submit overworld task for %s with %d edges\n", a.AreaID, na, len(el))
+		// correct the AreaID to account for large areas:
 		q.SubmitTask(&ReachTask{
 			Mode:            ModeOverworld,
 			Rooms:           t.Rooms,

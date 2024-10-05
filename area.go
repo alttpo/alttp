@@ -17,17 +17,23 @@ func (a AreaID) String() string {
 	return fmt.Sprintf("OW$%02X", uint8(a))
 }
 
+func (a AreaID) RowCol() (row, col int) {
+	row = int(a&0x38) >> 3
+	col = int(a & 0x07)
+	return
+}
+
 func (a AreaID) MoveBy(d Direction) (na AreaID, ok bool) {
 	switch d {
 	case DirNorth:
 		if a&0x38 > 0x00 {
-			return AreaID(a - 0x10), true
+			return AreaID(a - 0x08), true
 		} else {
 			return a, false
 		}
 	case DirSouth:
-		if a&0x38 < 0x30 {
-			return AreaID(a + 0x10), true
+		if a&0x38 < 0x38 {
+			return AreaID(a + 0x08), true
 		} else {
 			return a, false
 		}
@@ -141,41 +147,45 @@ func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bo
 // 1. if the neighbor area in the direction given is reachable
 // 2. if Link is at an OWCoord that leads to an edge transition
 // 3. the neighboring area's corrected AreaID (accounting for large areas)
-// 4. the OWCoord in the new area at the opposite edge
-func (a *Area) NeighborEdge(c OWCoord, d Direction) (ed Direction, nc OWCoord, na AreaID, ok bool) {
+// 4. the OWCoord in the new area at the opposite edge (assuming areas are same size)
+// ed: edge direction
+// nda: new area ID assuming the OW were divided into equal-sized areas (use Area#CorrectAreaID to fix)
+// ok: if it is ok to transition on this edge
+func (a *Area) NeighborEdge(c OWCoord, d Direction) (ed Direction, nda AreaID, ok bool) {
 	ed = d
-	nc = c
 
 	// can we move to the neighboring area?
-	na, ok = a.AreaID.MoveBy(d)
+	nda, ok = a.AreaID.MoveBy(d)
 	if !ok {
 		return
 	}
-	// correct the AreaID to account for large areas:
-	na = a.CorrectAreaID(na)
 
 	// now determine the edge OWCoord:
 	row, col := a.RowCol(c)
 	switch d {
 	case DirNorth:
-		ok = row <= 1
-		nc = RowColToOWCoord(a.Height-1-row, col)
+		ok = row == 0
 		return
 	case DirSouth:
-		ok = row >= int(a.Height)-2
-		nc = RowColToOWCoord(a.Height-1-row, col)
+		ok = row == int(a.Height)-1
 		return
 	case DirWest:
-		ok = col <= 1
-		nc = RowColToOWCoord(row, a.Width-1-col)
+		ok = col == 0
 		return
 	case DirEast:
-		ok = col >= int(a.Width)-2
-		nc = RowColToOWCoord(row, a.Width-1-col)
+		ok = col == int(a.Width)-1
 		return
 	}
 
 	ok = false
+	return
+}
+
+func (a *Area) AbsXY(c OWCoord) (absX, absY int) {
+	row, col := a.RowCol(c)
+	arow, acol := a.AreaID.RowCol()
+	absY = arow*0x40 + row
+	absX = acol*0x40 + col
 	return
 }
 

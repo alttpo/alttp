@@ -62,13 +62,14 @@ type ReachTask struct {
 	SE SE
 
 	// Overworld:
-	AreaID AreaID
-	X      uint16
-	Y      uint16
+	AreaID            AreaID
+	AreaIDUncorrected AreaID
+	X                 uint16
+	Y                 uint16
 
 	OWSS OWSS
 
-	OWEdges []OWSS
+	OWEdges []OWEdge
 }
 
 type T = *ReachTask
