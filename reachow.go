@@ -125,20 +125,128 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	// 	c: OWCoord(((linkY-ay)>>3)<<7 + (linkX-ax)>>3),
 	// 	d: DirSouth,
 	// }
-	se := OWSS{
+	t.OWSS = OWSS{
 		c: OWCoord(((t.Y-ay)>>3+6)<<7 + (t.X-ax)>>3),
 		d: DirSouth,
 	}
 
-	t.OWStates = append(t.OWStates, se)
+	a.overworldFloodFill(q, t)
+}
+
+func ReachTaskOverworldWorker(q Q, t T) {
+	var err error
+
+	var a *Area
+	var ok bool
+
+	fmt.Printf("%s: overworld worker!\n", t.AreaID)
+
+	t.AreasLock.Lock()
+	if a, ok = t.Areas[t.AreaID]; !ok {
+		e := &System{}
+		if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("%s: load\n", t.AreaID)
+		func() {
+			defer func() {
+				if ex := recover(); ex != nil {
+					fmt.Printf("ERROR: %v\n%s", ex, string(debug.Stack()))
+					a = &Area{
+						AreaID:   t.AreaID,
+						IsLoaded: false,
+					}
+				}
+			}()
+
+			copy(e.WRAM[:], t.EntranceWRAM[:])
+			copy(e.VRAM[:], t.EntranceVRAM[:])
+
+			wram := (*e.WRAM)[:]
+
+			// if uint16(st) == 0xA7 {
+			// 	e.LoggerCPU = os.Stdout
+			// }
+
+			// set the AreaID to load:
+			write8(wram, 0x8A, uint8(t.AreaID))
+			if err = e.ExecAt(loadOverworldPC, donePC); err != nil {
+				panic(err)
+			}
+			// run frames until back to module $09:
+			for i := 0; i < 256; i++ {
+				if err = e.ExecAt(runFramePC, donePC); err != nil {
+					panic(err)
+				}
+
+				// f++
+				// fmt.Printf(
+				// 	"f%04d: %02X %02X %02X\n",
+				// 	f,
+				// 	read8(wram, 0x010),
+				// 	read8(wram, 0x011),
+				// 	read8(wram, 0x0B0),
+				// )
+
+				// wait until module 09 or 0B (overworld):
+				if m := read8(wram, 0x10); m == 0x09 || m == 0x0B {
+					// wait until submodule goes back to 0:
+					if read8(wram, 0x011) == 0x00 {
+						break
+					}
+				}
+			}
+			// e.LoggerCPU = nil
+
+			a = createArea(t, e)
+		}()
+		t.Areas[t.AreaID] = a
+	}
+	t.AreasLock.Unlock()
+
+	if !a.IsLoaded {
+		return
+	}
+
+	wram := a.WRAM[:]
+
+	ax := read16(wram, 0x070C) << 3
+	ay := read16(wram, 0x0708)
 
 	fmt.Printf(
-		"%s: start %04X\n",
+		"%s: area at abs %04X, %04X\n",
 		a.AreaID,
-		uint16(se.c),
+		ax,
+		ay,
 	)
 
-	a.overworldFloodFill(q, t)
+	// linkX := read16(wram, 0x22)
+	// linkY := read16(wram, 0x20)
+	// fmt.Printf(
+	// 	"%s: link at abs %04X, %04X\n",
+	// 	a.AreaID,
+	// 	linkX,
+	// 	linkY,
+	// )
+
+	// fmt.Printf(
+	// 	"%s: link at rel %04X, %04X\n",
+	// 	a.AreaID,
+	// 	linkX-ax,
+	// 	linkY-ay,
+	// )
+
+	// set up initial scan state at where Link is:
+	// se := OWSS{
+	// 	c: OWCoord(((linkY-ay)>>3)<<7 + (linkX-ax)>>3),
+	// 	d: DirSouth,
+	// }
+
+	for _, se := range t.OWEdges {
+		t.OWSS = se
+		a.overworldFloodFill(q, t)
+	}
 }
 
 func createArea(t T, e *System) (a *Area) {
@@ -172,8 +280,8 @@ func createArea(t T, e *System) (a *Area) {
 	wram := (*e.WRAM)[:]
 
 	// grab area width,height extents in tiles:
-	a.Height = (read16(wram, 0x070A) + 0x10) >> 3
-	a.Width = (read16(wram, 0x070E) + 0x02)
+	a.Height = int(read16(wram, 0x070A)+0x10) >> 3
+	a.Width = int(read16(wram, 0x070E) + 0x02)
 
 	ah := uint32(a.Height)
 	aw := uint32(a.Width)
@@ -341,12 +449,24 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 	a.Mutex.Lock()
 	defer a.Mutex.Unlock()
 
+	fmt.Printf(
+		"%s: start %04X %5s\n",
+		a.AreaID,
+		uint16(t.OWSS.c),
+		t.OWSS.d,
+	)
+
 	lifo := make([]OWSS, 0, 0x1000)
-	lifo = append(lifo, t.OWStates...)
+	lifo = append(lifo, t.OWSS)
 
 	m := a.Tiles[:]
 
-	edges := [4][]OWSS{}
+	type edge struct {
+		a AreaID
+		s OWSS
+	}
+
+	areaEdges := map[AreaID][]OWSS{}
 
 	for len(lifo) > 0 {
 		s := lifo[len(lifo)-1]
@@ -371,11 +491,9 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			// gray rock and black rock:
 			canTraverse = true
 			canTurn = true
-			a.Reachable[c] = v
 		} else if a.isAlwaysWalkable(v) {
 			canTraverse = true
 			canTurn = true
-			a.Reachable[c] = v
 
 			if ent, ok := a.TileEntrance[c]; ok {
 				fmt.Printf("%s: underworld entrance %02X at %04X\n", a.AreaID, ent.EntranceID, uint16(c))
@@ -394,45 +512,52 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			}
 		}
 
-		// TODO: edge transitions
 		// TODO: large rocks
 		// TODO: deep water
 		// TODO: mirroring between LW and DW
 
-		if canTraverse {
-			if canTurn {
-				if c, d, ok := a.Traverse(c, d.RotateCCW(), 1); ok {
-					lifo = append(lifo, OWSS{c: c, d: d})
-				}
-				if c, d, ok := a.Traverse(c, d.RotateCW(), 1); ok {
-					lifo = append(lifo, OWSS{c: c, d: d})
-				}
+		if !canTraverse {
+			continue
+		}
+
+		a.Reachable[c] = v
+
+		// transition to neighboring area at the edges:
+		if _, ct, na, ok := a.NeighborEdge(c, d); ok {
+			fmt.Printf("%s: edge $%04X %s exit to %s at %04X\n", t.AreaID, uint16(c), d, na, uint16(ct))
+			areaEdges[na] = append(areaEdges[na], OWSS{c: ct, d: d})
+			continue
+		}
+
+		if canTurn {
+			if c, d, ok := a.Traverse(c, d.RotateCCW(), 1); ok {
+				lifo = append(lifo, OWSS{c: c, d: d})
 			}
-			if c, d, ok := a.Traverse(c, d, 1); ok {
+			if c, d, ok := a.Traverse(c, d.RotateCW(), 1); ok {
 				lifo = append(lifo, OWSS{c: c, d: d})
 			}
 		}
+		if c, d, ok := a.Traverse(c, d, 1); ok {
+			lifo = append(lifo, OWSS{c: c, d: d})
+		}
 	}
 
-	if false {
-		for d := range edges {
-			s := edges[d]
-			if len(s) > 0 {
-				q.SubmitTask(&ReachTask{
-					Mode:            ModeOverworld,
-					Rooms:           t.Rooms,
-					RoomsLock:       t.RoomsLock,
-					Areas:           t.Areas,
-					AreasLock:       t.AreasLock,
-					InitialEmulator: t.InitialEmulator,
+	// submit one task for each area-edge pair:
+	for na, el := range areaEdges {
+		fmt.Printf("%s: submit overworld task for %s with %d edges\n", a.AreaID, na, len(el))
+		q.SubmitTask(&ReachTask{
+			Mode:            ModeOverworld,
+			Rooms:           t.Rooms,
+			RoomsLock:       t.RoomsLock,
+			Areas:           t.Areas,
+			AreasLock:       t.AreasLock,
+			InitialEmulator: t.InitialEmulator,
 
-					EntranceWRAM: &a.WRAMAfterLoaded,
-					EntranceVRAM: &a.VRAMAfterLoaded,
+			EntranceWRAM: &a.WRAMAfterLoaded,
+			EntranceVRAM: &a.VRAMAfterLoaded,
 
-					AreaID:   a.AreaID,
-					OWStates: s,
-				}, ReachTaskOverworldFromUnderworldWorker)
-			}
-		}
+			AreaID:  na,
+			OWEdges: el,
+		}, ReachTaskOverworldWorker)
 	}
 }

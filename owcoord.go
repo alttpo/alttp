@@ -9,3 +9,7 @@ func Map16ToOWCoord(t uint16) (c OWCoord) {
 	// x-coordinate needs no transform because uint16->uint8 conversion is balanced by 2x2 expansion
 	return OWCoord((y << 1) + x)
 }
+
+func RowColToOWCoord(row, col int) OWCoord {
+	return OWCoord((row&0x7F)<<7 + col&0x7F)
+}

@@ -66,7 +66,9 @@ type ReachTask struct {
 	X      uint16
 	Y      uint16
 
-	OWStates []OWSS
+	OWSS OWSS
+
+	OWEdges []OWSS
 }
 
 type T = *ReachTask

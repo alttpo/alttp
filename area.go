@@ -17,11 +17,42 @@ func (a AreaID) String() string {
 	return fmt.Sprintf("OW$%02X", uint8(a))
 }
 
+func (a AreaID) MoveBy(d Direction) (na AreaID, ok bool) {
+	switch d {
+	case DirNorth:
+		if a&0x38 > 0x00 {
+			return AreaID(a - 0x10), true
+		} else {
+			return a, false
+		}
+	case DirSouth:
+		if a&0x38 < 0x30 {
+			return AreaID(a + 0x10), true
+		} else {
+			return a, false
+		}
+	case DirEast:
+		if a&0x07 < 0x07 {
+			return AreaID(a + 0x01), true
+		} else {
+			return a, false
+		}
+	case DirWest:
+		if a&0x07 > 0x00 {
+			return AreaID(a - 0x01), true
+		} else {
+			return a, false
+		}
+	default:
+		panic(fmt.Sprintf("unexpected Direction: %#v", d))
+	}
+}
+
 type Area struct {
 	AreaID AreaID
 
-	Width  uint16 // width in 8x8 tiles
-	Height uint16 // height in 8x8 tiles
+	Width  int // width in 8x8 tiles
+	Height int // height in 8x8 tiles
 
 	IsLoaded bool
 
@@ -104,6 +135,77 @@ func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bo
 	default:
 		panic("bad direction")
 	}
+}
+
+// NeighborEdge determines:
+// 1. if the neighbor area in the direction given is reachable
+// 2. if Link is at an OWCoord that leads to an edge transition
+// 3. the neighboring area's corrected AreaID (accounting for large areas)
+// 4. the OWCoord in the new area at the opposite edge
+func (a *Area) NeighborEdge(c OWCoord, d Direction) (ed Direction, nc OWCoord, na AreaID, ok bool) {
+	ed = d
+	nc = c
+
+	// can we move to the neighboring area?
+	na, ok = a.AreaID.MoveBy(d)
+	if !ok {
+		return
+	}
+	// correct the AreaID to account for large areas:
+	na = a.CorrectAreaID(na)
+
+	// now determine the edge OWCoord:
+	row, col := a.RowCol(c)
+	switch d {
+	case DirNorth:
+		ok = row <= 1
+		nc = RowColToOWCoord(a.Height-1-row, col)
+		return
+	case DirSouth:
+		ok = row >= int(a.Height)-2
+		nc = RowColToOWCoord(a.Height-1-row, col)
+		return
+	case DirWest:
+		ok = col <= 1
+		nc = RowColToOWCoord(row, a.Width-1-col)
+		return
+	case DirEast:
+		ok = col >= int(a.Width)-2
+		nc = RowColToOWCoord(row, a.Width-1-col)
+		return
+	}
+
+	ok = false
+	return
+}
+
+func (a *Area) OppositeEdge(c OWCoord) (ct OWCoord, ok bool) {
+	row, col := a.RowCol(c)
+	if row <= 1 {
+		return RowColToOWCoord(a.Height-1-row, col), true
+	}
+	if row >= int(a.Height)-2 {
+		return RowColToOWCoord(a.Height-1-row, col), true
+	}
+	if col <= 1 {
+		return RowColToOWCoord(row, a.Width-1-col), true
+	}
+	if col >= int(a.Width)-2 {
+		return RowColToOWCoord(row, a.Width-1-col), true
+	}
+	return c, false
+}
+
+func (a *Area) CorrectAreaID(aid AreaID) (na AreaID) {
+	// entire overworld is 512 tiles x 512 tiles
+	// each area is max $80 tiles wide x $80 tiles high
+
+	// Overworld_ActualScreenID is an 8x8 grid of AreaIDs
+	// look up real area id, accounting for the large areas:
+	addr := alttp.Overworld_ActualScreenID + uint32(aid&0x3F)
+	na = AreaID(a.e.Bus.Read8(addr) | (uint8(aid) & 0x40))
+
+	return
 }
 
 var (
