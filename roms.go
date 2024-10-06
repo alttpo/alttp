@@ -63,6 +63,9 @@ type romPointers struct {
 	Overworld_LoadGFXAndScreenSize             uint32 // 0x02_AA07
 	OverworldHandleTransitions_change_palettes uint32 // 0x02_A9F3
 
+	OverworldData_HiddenItems uint32 // 0x1B_C2F9
+	Overworld_SecretTileType  uint32 // 0x1B_C89C
+
 	SpriteHitBox_OffsetXLow  uint32
 	SpriteHitBox_OffsetXHigh uint32
 	SpriteHitBox_Width       uint32
@@ -123,6 +126,9 @@ var alttpJP10 = romPointers{
 
 	Overworld_LoadGFXAndScreenSize:             0x02_AA07,
 	OverworldHandleTransitions_change_palettes: 0x02_A9F3,
+
+	OverworldData_HiddenItems: 0x1B_C2F9,
+	Overworld_SecretTileType:  0x1B_C89C,
 
 	SpriteHitBox_OffsetXLow:  0x06_F735,
 	SpriteHitBox_OffsetXHigh: 0x06_F735 + 0x20,
@@ -186,6 +192,9 @@ var alttpUS = romPointers{
 
 	Overworld_LoadGFXAndScreenSize:             0x02_AB08, // confirmed
 	OverworldHandleTransitions_change_palettes: 0x02_AAF4, // confirmed
+
+	OverworldData_HiddenItems: 0x1B_C2F9, // confirmed
+	Overworld_SecretTileType:  0x1B_C89C, // confirmed
 
 	SpriteHitBox_OffsetXLow:  0x06_F72F, // confirmed
 	SpriteHitBox_OffsetXHigh: 0x06_F72F + 0x20,

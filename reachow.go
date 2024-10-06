@@ -290,6 +290,35 @@ func createArea(t T, e *System) (a *Area) {
 	ah := uint32(a.Height)
 	aw := uint32(a.Width)
 
+	// find overworld tile secrets and reveal them:
+	{
+		j := uint32(0x1B_0000) | uint32(e.Bus.Read16(alttp.OverworldData_HiddenItems+(uint32(a.AreaID)<<1)))
+		for ; ; j += 3 {
+			// location of secret:
+			m16 := e.Bus.Read16(j + 0)
+			if m16 == 0xFFFF {
+				break
+			}
+
+			// type of secret:
+			v := e.Bus.Read8(j + 2)
+			if v < 0x80 {
+				// not a tile replacement:
+				continue
+			}
+			if v == 0x84 {
+				// stairs are broken in this lookup for some reason:
+				continue
+			}
+
+			// find the tile type:
+			t16 := e.Bus.Read16(alttp.Overworld_SecretTileType + uint32(v&0x0F))
+			fmt.Printf("%s: secret reveal at %04X: %04X\n", a.AreaID, m16, t16)
+			// do the tile replacement:
+			write16(wram[0x2000:], uint32(m16), t16)
+		}
+	}
+
 	// decode map16 overworld from $7E2000 into both map8 and tile types:
 	for row := uint32(0); row < ah; row += 2 {
 		for col := uint32(0); col < aw; col += 2 {
@@ -498,6 +527,10 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			// pit:
 			a.Reachable[c] = v
 			a.Reachable[cn] = v
+		} else if v == 0x08 {
+			// deep water:
+			canTraverse = true
+			canTurn = true
 		} else if v == 0x52 || v == 0x53 {
 			// gray rock and black rock:
 			canTraverse = true
