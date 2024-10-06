@@ -121,6 +121,12 @@ func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bo
 // nda: new area ID assuming the OW were divided into equal-sized areas (use Area#CorrectAreaID to fix)
 // ok: if it is ok to transition on this edge
 func (a *Area) NeighborEdge(c OWCoord, d Direction) (absX, absY int, na AreaID, ok bool) {
+	// Hack to stop traversing from waterfall into TR light world:
+	if a.AreaID == 0x0F && d == DirNorth {
+		ok = false
+		return
+	}
+
 	row, col := a.RowCol(c)
 	absX, absY = a.AbsXY(c)
 
