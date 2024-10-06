@@ -123,31 +123,33 @@ func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bo
 func (a *Area) NeighborEdge(c OWCoord, d Direction) (absX, absY int, na AreaID, ok bool) {
 	row, col := a.RowCol(c)
 	absX, absY = a.AbsXY(c)
+
+	// we move by 2 here to skip 1-tile collision borders around certain OW areas, e.g. north side of OW$10
 	switch d {
 	case DirNorth:
 		ok = row == 0
-		absY--
+		absY -= 2
 		if absY < 0 {
 			ok = false
 			return
 		}
 	case DirSouth:
 		ok = row == int(a.Height)-1
-		absY++
+		absY += 2
 		if absY > 0x1FF {
 			ok = false
 			return
 		}
 	case DirWest:
 		ok = col == 0
-		absX--
+		absX -= 2
 		if absX < 0 {
 			ok = false
 			return
 		}
 	case DirEast:
 		ok = col == int(a.Width)-1
-		absX++
+		absX += 2
 		if absX > 0x1FF {
 			ok = false
 			return

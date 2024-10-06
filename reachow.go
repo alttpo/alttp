@@ -516,7 +516,7 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 		canTurn := false
 
 		v, vn := m[c], m[cn]
-		if v == 0x20 && vn == 0x20 {
+		if v == 0x20 {
 			// pit:
 			a.Reachable[c] = v
 			a.Reachable[cn] = v

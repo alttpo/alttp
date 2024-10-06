@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unsafe"
 
 	"github.com/alttpo/snes"
 	"github.com/alttpo/snes/asm"
@@ -516,6 +515,28 @@ func main() {
 		}
 
 		// condense all maps into big atlas images:
+		if true {
+			func() {
+				// entire overworld is 512x512 8px tiles:
+				g := image.NewNRGBA(image.Rect(0, 0, 4096, 4096))
+				for aid, a := range areasMap {
+					row, col := aid.RowCol()
+					draw.Draw(
+						g,
+						image.Rect(
+							col*0x40*8,
+							row*0x40*8,
+							(col*0x40+a.Width)*8,
+							(row*0x40+a.Height)*8,
+						),
+						a.RenderedNRGBA,
+						image.Point{},
+						draw.Over,
+					)
+				}
+				exportPNG("ow-all.png", g)
+			}()
+		}
 		if drawEG1 {
 			renderAll("eg1", rooms, 0x00, 0x10)
 		}
@@ -630,7 +651,7 @@ func main() {
 		return
 	}
 
-	// new simplified reachability:
+	// old simplified reachability:
 	if false {
 		err = reachabilityAnalysis(&e)
 		if err != nil {
@@ -638,274 +659,7 @@ func main() {
 		}
 	}
 
-	// overworld screens:
-	if false {
-		func(initEmu *System) {
-			e := &System{
-				Logger:    nil,
-				LoggerCPU: nil,
-			}
-			if err = e.InitEmulatorFrom(initEmu); err != nil {
-				panic(err)
-			}
-
-			wram := e.WRAM[:]
-
-			a := gif.GIF{}
-			var aLastFrame *image.Paletted = nil
-			renderGifFrame := func() {
-				pal, bg1p, bg2p, addColor, halfColor := renderOWBGLayers(
-					e.WRAM,
-					(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x0000])))[:],
-					(*(*[0x1000]uint16)(unsafe.Pointer(&e.VRAM[0x2000])))[:],
-					e.VRAM[0x4000:0x8000],
-				)
-				g := image.NewPaletted(image.Rect(0, 0, 512, 512), pal)
-				ComposeToPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
-				renderSpriteLabels(g, e.WRAM[:], Supertile(read16(e.WRAM[:], 0xA0)))
-
-				dirty := true
-				var delta *image.Paletted
-				if aLastFrame != nil {
-					delta, dirty = generateDeltaFrame(aLastFrame, g)
-				} else {
-					delta = g
-				}
-				aLastFrame = g
-
-				if dirty {
-					a.Image = append(a.Image, delta)
-					a.Delay = append(a.Delay, 2)
-					a.Disposal = append(a.Disposal, gif.DisposalNone)
-				} else {
-					a.Delay[len(a.Delay)-1] += 2
-				}
-			}
-
-			// frameTrace := bytes.Buffer{}
-			f := 0
-
-			if true {
-				// start new game:
-				write8(wram, 0x10, 0x05)
-				write8(wram, 0x11, 0x00)
-				write8(wram, 0xB0, 0x00)
-				fmt.Println("module 05")
-
-				fmt.Printf(
-					"f%04d: %02X %02X %02X\n",
-					f,
-					read8(wram, 0x010),
-					read8(wram, 0x011),
-					read8(wram, 0x0B0),
-				)
-				for i := 0; i < 256; i++ {
-					if err = e.ExecAt(runFramePC, donePC); err != nil {
-						panic(err)
-					}
-					// renderGifFrame()
-
-					f++
-					fmt.Printf(
-						"f%04d: %02X %02X %02X\n",
-						f,
-						read8(wram, 0x010),
-						read8(wram, 0x011),
-						read8(wram, 0x0B0),
-					)
-
-					// wait until submodule goes back to 0:
-					if read8(wram, 0x011) == 0x00 {
-						break
-					}
-				}
-			}
-
-			if true {
-				// load entrance for Hyrule Castle to get to a "large area":
-				// e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x04
-				e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x02
-
-				if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
-					panic(err)
-				}
-			}
-
-			if true {
-				// move to module $08 to exit the underworld:
-				fmt.Println("module $08")
-				write8(wram, 0x10, 0x08)
-				write8(wram, 0x11, 0x00)
-				// run frames until back to module $09:
-				for i := 0; i < 256; i++ {
-					// e.LoggerCPU = os.Stdout
-					if err = e.ExecAt(runFramePC, donePC); err != nil {
-						panic(err)
-					}
-					// e.LoggerCPU = nil
-					// renderGifFrame()
-
-					f++
-					fmt.Printf(
-						"f%04d: %02X %02X %02X\n",
-						f,
-						read8(wram, 0x010),
-						read8(wram, 0x011),
-						read8(wram, 0x0B0),
-					)
-
-					// wait until module 09 or 0B (overworld):
-					if m := read8(wram, 0x10); m == 0x09 || m == 0x0B {
-						// wait until submodule goes back to 0:
-						if read8(wram, 0x011) == 0x00 {
-							break
-						}
-					}
-				}
-			}
-
-			if false {
-				// load sanctuary entrance:
-				fmt.Println("load sanctuary entrance")
-				//e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x02
-				e.HWIO.Dyn[setEntranceIDPC&0xffff-0x5000] = 0x00
-				if err = e.ExecAt(loadEntrancePC, donePC); err != nil {
-					panic(err)
-				}
-				f++
-				fmt.Println(f)
-				renderGifFrame()
-			}
-
-			if false {
-				// hold DOWN to exit underworld out to overworld:
-				//                            BYsSudlr AXLRvvvv
-				e.HWIO.ControllerInput[0] = 0b00000100_00000000
-				// emulate until module=9,submodule=0:
-				fmt.Println("hold DOWN until module 9")
-				for {
-					//if read8(wram, 0x10) != 0x7 /* && read8(wram, 0x11) == 0*/ {
-					//	// dump last frame's CPU trace:
-					//	frameTrace.WriteTo(os.Stdout)
-					//	break
-					//}
-					if read8(wram, 0x10) == 0x9 && read8(wram, 0x11) == 0 {
-						// frameTrace.WriteTo(os.Stdout)
-						break
-					}
-					// if f&63 == 63 {
-					// 	RenderGIF(&a, "a-test.gif")
-					// }
-					// frameTrace.Reset()
-					// e.Logger = &frameTrace
-					// e.LoggerCPU = &frameTrace
-					//e.LoggerCPU = os.Stdout
-					if err = e.ExecAt(runFramePC, donePC); err != nil {
-						panic(err)
-					}
-					// e.Logger = nil
-					// e.LoggerCPU = nil
-
-					f++
-					fmt.Printf(
-						"f%04d: %02X %02X %02X\n",
-						f,
-						read8(wram, 0x010),
-						read8(wram, 0x011),
-						read8(wram, 0x0B0),
-					)
-					os.WriteFile(
-						fmt.Sprintf("f%04d.wram", f),
-						e.WRAM[0x2000:0x6000],
-						0644,
-					)
-					// renderGifFrame()
-				}
-			}
-
-			// grab area width,height extents in tiles:
-			ah := int(read16(wram, 0x070A)+0x10) >> 3
-			aw := int(read16(wram, 0x070E) + 0x02)
-
-			// decode map16 overworld from $7E2000 into what we're used to seeing for the underworld at $7F2000:
-			map8 := [0x80 * 0x80]uint16{}
-			tiles := [0x80 * 0x80]byte{}
-			for row := uint32(0); row < uint32(ah); row += 2 {
-				for col := uint32(0); col < uint32(aw); col += 2 {
-					// read map16 blocks from WRAM at $7E2000:
-					m16 := uint32(read16(e.WRAM[0x2000:], (row*0x40 + col)))
-					// translate into map8 blocks via Map16Definitions:
-					df := [4]uint16{
-						e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 0),
-						e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 2),
-						e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 4),
-						e.Bus.Read16(alttp.Map16Definitions + (m16 << 3) + 6),
-					}
-					// store map8 blocks:
-					map8[((row+0)*0x80)+(col+0)] = df[0]
-					map8[((row+0)*0x80)+(col+1)] = df[1]
-					map8[((row+1)*0x80)+(col+0)] = df[2]
-					map8[((row+1)*0x80)+(col+1)] = df[3]
-					// translate presentation map8 blocks into tile types:
-					tiles[((row+0)*0x80)+(col+0)] = e.Bus.Read8(alttp.OverworldTileTypes + uint32(df[0]&0x01FF))
-					tiles[((row+0)*0x80)+(col+1)] = e.Bus.Read8(alttp.OverworldTileTypes + uint32(df[1]&0x01FF))
-					tiles[((row+1)*0x80)+(col+0)] = e.Bus.Read8(alttp.OverworldTileTypes + uint32(df[2]&0x01FF))
-					tiles[((row+1)*0x80)+(col+1)] = e.Bus.Read8(alttp.OverworldTileTypes + uint32(df[3]&0x01FF))
-				}
-			}
-
-			os.WriteFile(
-				"overworld.map8",
-				(*(*[0x80 * 0x80 * 2]byte)(unsafe.Pointer(&map8[0])))[:],
-				0644,
-			)
-			os.WriteFile(
-				"overworld.tmap",
-				tiles[:],
-				0644,
-			)
-
-			if false {
-				fmt.Println("release DOWN for 300 frames")
-				e.HWIO.ControllerInput[0] = 0b00000000_00000000
-				for n := 0; n < 300; n++ {
-					//e.LoggerCPU = os.Stdout
-					if err = e.ExecAt(runFramePC, donePC); err != nil {
-						panic(err)
-					}
-					f++
-					fmt.Println(f)
-					// renderGifFrame()
-				}
-			}
-
-			{
-				cgram := (*(*[0x100]uint16)(unsafe.Pointer(&wram[0xC300])))[:]
-				pal := cgramToPalette(cgram)
-				bg1 := [2]*image.Paletted{
-					image.NewPaletted(image.Rect(0, 0, 0x80*8, 0x80*8), pal),
-					image.NewPaletted(image.Rect(0, 0, 0x80*8, 0x80*8), pal),
-				}
-				bg2 := [2]*image.Paletted{
-					image.NewPaletted(image.Rectangle{}, nil),
-					image.NewPaletted(image.Rectangle{}, nil),
-				}
-				renderMap8(bg1, aw, ah, map8[:], e.VRAM[0x4000:0x8000], drawBG1p0, drawBG1p1)
-				// compose the priority layers:
-				g := image.NewNRGBA(image.Rect(0, 0, 0x80*8, 0x80*8))
-				ComposeToNonPalettedOW(g, pal, bg1, bg2, 0x80, false, false)
-				// renderSpriteLabels(g, wram, Supertile(read16(wram, 0xA0)))
-				// exportPNG("a-test-bg1p0.png", bg1[0])
-				// exportPNG("a-test-bg1p1.png", bg1[1])
-				exportPNG("a-test.png", g)
-			}
-
-			// RenderGIF(&a, "a-test.gif")
-		}(&e)
-		return
-	}
-
-	// old floodfill analysis:
+	// old bad floodfill analysis:
 	if false {
 		wg := sync.WaitGroup{}
 		entranceGroups := make([]Entrance, entranceCount)
