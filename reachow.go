@@ -234,28 +234,6 @@ func ReachTaskOverworldWorker(q Q, t T) {
 		ay,
 	)
 
-	// linkX := read16(wram, 0x22)
-	// linkY := read16(wram, 0x20)
-	// fmt.Printf(
-	// 	"%s: link at abs %04X, %04X\n",
-	// 	a.AreaID,
-	// 	linkX,
-	// 	linkY,
-	// )
-
-	// fmt.Printf(
-	// 	"%s: link at rel %04X, %04X\n",
-	// 	a.AreaID,
-	// 	linkX-ax,
-	// 	linkY-ay,
-	// )
-
-	// set up initial scan state at where Link is:
-	// se := OWSS{
-	// 	c: OWCoord(((linkY-ay)>>3)<<7 + (linkX-ax)>>3),
-	// 	d: DirSouth,
-	// }
-
 	for _, ed := range t.OWEdges {
 		row, col := ed.absY, ed.absX
 
@@ -524,6 +502,10 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			// gray rock and black rock:
 			canTraverse = true
 			canTurn = true
+		} else if v == 0x55 || v == 0x56 {
+			// large gray rock and large black rock:
+			canTraverse = true
+			canTurn = true
 		} else if a.isAlwaysWalkable(v) && a.isAlwaysWalkable(vn) {
 			canTraverse = true
 			canTurn = true
@@ -545,7 +527,6 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			}
 		}
 
-		// TODO: large rocks
 		// TODO: deep water
 		// TODO: mirroring between LW and DW
 
