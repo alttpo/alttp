@@ -13,9 +13,9 @@ type OWSS struct {
 }
 
 type OWEdge struct {
-	fromX int
-	fromY int
-	d     Direction
+	absX int
+	absY int
+	d    Direction
 }
 
 func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
@@ -257,19 +257,7 @@ func ReachTaskOverworldWorker(q Q, t T) {
 	// }
 
 	for _, ed := range t.OWEdges {
-		// adjust start position to fit area:
-		row, col := ed.fromY, ed.fromX
-		// TODO: move this to NeighborEdge
-		switch ed.d {
-		case DirNorth:
-			row -= 1
-		case DirSouth:
-			row += 1
-		case DirWest:
-			col -= 1
-		case DirEast:
-			col += 1
-		}
+		row, col := ed.absY, ed.absX
 
 		// offset from area top-left:
 		arow, acol := a.AreaID.RowCol()
@@ -507,6 +495,17 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 
 		c := s.c
 		d := s.d
+		cn := c
+		switch d {
+		case DirNorth:
+			cn, _, _ = a.Traverse(c, DirEast, 1)
+		case DirSouth:
+			cn, _, _ = a.Traverse(c, DirEast, 1)
+		case DirWest:
+			cn, _, _ = a.Traverse(c, DirSouth, 1)
+		case DirEast:
+			cn, _, _ = a.Traverse(c, DirSouth, 1)
+		}
 
 		if _, ok := a.TilesVisited[c]; ok {
 			continue
@@ -516,15 +515,16 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 		canTraverse := false
 		canTurn := false
 
-		v := m[c]
-		if v == 0x20 {
+		v, vn := m[c], m[cn]
+		if v == 0x20 && vn == 0x20 {
 			// pit:
 			a.Reachable[c] = v
+			a.Reachable[cn] = v
 		} else if v == 0x52 || v == 0x53 {
 			// gray rock and black rock:
 			canTraverse = true
 			canTurn = true
-		} else if a.isAlwaysWalkable(v) {
+		} else if a.isAlwaysWalkable(v) && a.isAlwaysWalkable(vn) {
 			canTraverse = true
 			canTurn = true
 
@@ -554,13 +554,12 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 		}
 
 		a.Reachable[c] = v
+		a.Reachable[cn] = v
 
 		// transition to neighboring area at the edges:
-		if _, nda, ok := a.NeighborEdge(c, d); ok {
-			absX, absY := a.AbsXY(c)
-			na := a.CorrectAreaID(nda)
-			fmt.Printf("%s: edge $%04X %s exit to %s from (%03X,%03X)\n", t.AreaID, uint16(c), d, na, absX, absY)
-			areaEdges[na] = append(areaEdges[na], OWEdge{fromX: absX, fromY: absY, d: d})
+		if absX, absY, na, ok := a.NeighborEdge(c, d); ok {
+			fmt.Printf("%s: edge $%04X %s exit to %s starting at (%03X,%03X)\n", t.AreaID, uint16(c), d, na, absX, absY)
+			areaEdges[na] = append(areaEdges[na], OWEdge{absX: absX, absY: absY, d: d})
 			continue
 		}
 

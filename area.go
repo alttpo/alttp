@@ -23,37 +23,6 @@ func (a AreaID) RowCol() (row, col int) {
 	return
 }
 
-func (a AreaID) MoveBy(d Direction) (na AreaID, ok bool) {
-	switch d {
-	case DirNorth:
-		if a&0x38 > 0x00 {
-			return AreaID(a - 0x08), true
-		} else {
-			return a, false
-		}
-	case DirSouth:
-		if a&0x38 < 0x38 {
-			return AreaID(a + 0x08), true
-		} else {
-			return a, false
-		}
-	case DirEast:
-		if a&0x07 < 0x07 {
-			return AreaID(a + 0x01), true
-		} else {
-			return a, false
-		}
-	case DirWest:
-		if a&0x07 > 0x00 {
-			return AreaID(a - 0x01), true
-		} else {
-			return a, false
-		}
-	default:
-		panic(fmt.Sprintf("unexpected Direction: %#v", d))
-	}
-}
-
 type Area struct {
 	AreaID AreaID
 
@@ -151,33 +120,47 @@ func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bo
 // ed: edge direction
 // nda: new area ID assuming the OW were divided into equal-sized areas (use Area#CorrectAreaID to fix)
 // ok: if it is ok to transition on this edge
-func (a *Area) NeighborEdge(c OWCoord, d Direction) (ed Direction, nda AreaID, ok bool) {
-	ed = d
-
-	// can we move to the neighboring area?
-	nda, ok = a.AreaID.MoveBy(d)
-	if !ok {
-		return
-	}
-
-	// now determine the edge OWCoord:
+func (a *Area) NeighborEdge(c OWCoord, d Direction) (absX, absY int, na AreaID, ok bool) {
 	row, col := a.RowCol(c)
+	absX, absY = a.AbsXY(c)
 	switch d {
 	case DirNorth:
 		ok = row == 0
-		return
+		absY--
+		if absY < 0 {
+			ok = false
+			return
+		}
 	case DirSouth:
 		ok = row == int(a.Height)-1
-		return
+		absY++
+		if absY > 0x1FF {
+			ok = false
+			return
+		}
 	case DirWest:
 		ok = col == 0
-		return
+		absX--
+		if absX < 0 {
+			ok = false
+			return
+		}
 	case DirEast:
 		ok = col == int(a.Width)-1
-		return
+		absX++
+		if absX > 0x1FF {
+			ok = false
+			return
+		}
+	default:
+		panic("bad direction")
 	}
 
-	ok = false
+	// calculate desired areaID assuming all areas are the same size $40 x $40
+	nda := AreaID(uint8((absY>>6)<<3) | uint8(absX>>6)&0x07 | (uint8(a.AreaID) & 0x40))
+	// adjust to real areaID:
+	na = a.CorrectAreaID(nda)
+
 	return
 }
 
