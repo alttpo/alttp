@@ -605,6 +605,10 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			// large gray rock and large black rock:
 			canTraverse = true
 			canTurn = true
+		} else if v == 0x57 || v == 0x57 {
+			// bonk rocks:
+			canTraverse = true
+			canTurn = true
 		} else if a.isAlwaysWalkable(v) && a.isAlwaysWalkable(vn) {
 			canTraverse = true
 			canTurn = true
