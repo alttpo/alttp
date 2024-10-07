@@ -70,6 +70,7 @@ type ReachTask struct {
 	OWSS OWSS
 
 	OWEdges []OWEdge
+	OWWarps []OWCoord
 }
 
 type T = *ReachTask

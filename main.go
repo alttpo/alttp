@@ -518,11 +518,14 @@ func main() {
 		if true {
 			func() {
 				// entire overworld is 512x512 8px tiles:
-				g := image.NewNRGBA(image.Rect(0, 0, 4096, 4096))
+				ow := [2]*image.NRGBA{
+					image.NewNRGBA(image.Rect(0, 0, 4096, 4096)),
+					image.NewNRGBA(image.Rect(0, 0, 4096, 4096)),
+				}
 				for aid, a := range areasMap {
 					row, col := aid.RowCol()
 					draw.Draw(
-						g,
+						ow[(a.AreaID&0x40)>>6],
 						image.Rect(
 							col*0x40*8,
 							row*0x40*8,
@@ -534,7 +537,9 @@ func main() {
 						draw.Over,
 					)
 				}
-				exportPNG("ow-all.png", g)
+				exportPNG("ow-lw.png", ow[0])
+				exportPNG("ow-dw.png", ow[1])
+				// TODO: special overworld
 			}()
 		}
 		if drawEG1 {

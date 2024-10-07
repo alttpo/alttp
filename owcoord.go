@@ -13,3 +13,9 @@ func Map16ToOWCoord(t uint16) (c OWCoord) {
 func RowColToOWCoord(row, col int) OWCoord {
 	return OWCoord((row&0x7F)<<7 + col&0x7F)
 }
+
+func (c OWCoord) RowCol() (row, col int) {
+	row = int((c & 0x3F80) >> 7)
+	col = int(c & 0x7F)
+	return
+}

@@ -18,13 +18,23 @@ type OWEdge struct {
 	d    Direction
 }
 
-func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
+func createAreaIfNotExists(t T, loadArea func(T, *System)) (a *Area) {
 	var err error
 
-	var a *Area
-	var ok bool
+	defer func() {
+		if ex := recover(); ex != nil {
+			fmt.Printf("ERROR: %v\n%s", ex, string(debug.Stack()))
+			a = &Area{
+				AreaID:   t.AreaID,
+				IsLoaded: false,
+			}
+		}
+	}()
 
 	t.AreasLock.Lock()
+	defer t.AreasLock.Unlock()
+
+	var ok bool
 	if a, ok = t.Areas[t.AreaID]; !ok {
 		e := &System{}
 		if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
@@ -32,16 +42,22 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 		}
 
 		fmt.Printf("%s: load\n", t.AreaID)
-		func() {
-			defer func() {
-				if ex := recover(); ex != nil {
-					fmt.Printf("ERROR: %v\n%s", ex, string(debug.Stack()))
-					a = &Area{
-						AreaID:   t.AreaID,
-						IsLoaded: false,
-					}
-				}
-			}()
+		loadArea(t, e)
+
+		a = createArea(t, e)
+		t.Areas[t.AreaID] = a
+	}
+
+	return
+}
+
+func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
+	var err error
+
+	var a *Area
+	a = createAreaIfNotExists(
+		t,
+		func(t T, e *System) {
 
 			copy(e.WRAM[:], t.EntranceWRAM[:])
 			copy(e.VRAM[:], t.EntranceVRAM[:])
@@ -80,12 +96,8 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 				}
 			}
 			// e.LoggerCPU = nil
-
-			a = createArea(t, e)
-		}()
-		t.Areas[t.AreaID] = a
-	}
-	t.AreasLock.Unlock()
+		},
+	)
 
 	if !a.IsLoaded {
 		return
@@ -139,33 +151,15 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	a.overworldFloodFill(q, t)
 }
 
-func ReachTaskOverworldWorker(q Q, t T) {
+func ReachTaskOverworldEdgeWorker(q Q, t T) {
 	var err error
 
+	fmt.Printf("%s: overworld edge worker!\n", t.AreaID)
+
 	var a *Area
-	var ok bool
-
-	fmt.Printf("%s: overworld worker!\n", t.AreaID)
-
-	t.AreasLock.Lock()
-	if a, ok = t.Areas[t.AreaID]; !ok {
-		e := &System{}
-		if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
-			panic(err)
-		}
-
-		fmt.Printf("%s: load\n", t.AreaID)
-		func() {
-			defer func() {
-				if ex := recover(); ex != nil {
-					fmt.Printf("ERROR: %v\n%s", ex, string(debug.Stack()))
-					a = &Area{
-						AreaID:   t.AreaID,
-						IsLoaded: false,
-					}
-				}
-			}()
-
+	a = createAreaIfNotExists(
+		t,
+		func(t T, e *System) {
 			copy(e.WRAM[:], t.EntranceWRAM[:])
 			copy(e.VRAM[:], t.EntranceVRAM[:])
 
@@ -211,28 +205,14 @@ func ReachTaskOverworldWorker(q Q, t T) {
 				}
 			}
 			// e.LoggerCPU = nil
-
-			a = createArea(t, e)
-		}()
-		t.Areas[t.AreaID] = a
-	}
-	t.AreasLock.Unlock()
+		},
+	)
 
 	if !a.IsLoaded {
 		return
 	}
 
-	wram := a.WRAM[:]
-
-	ax := read16(wram, 0x070C) << 3
-	ay := read16(wram, 0x0708)
-
-	fmt.Printf(
-		"%s: area at abs %04X, %04X\n",
-		a.AreaID,
-		ax,
-		ay,
-	)
+	// wram := a.WRAM[:]
 
 	for _, ed := range t.OWEdges {
 		row, col := ed.absY, ed.absX
@@ -248,6 +228,91 @@ func ReachTaskOverworldWorker(q Q, t T) {
 
 		t.OWSS.c = RowColToOWCoord(row, col)
 		t.OWSS.d = ed.d
+
+		a.overworldFloodFill(q, t)
+	}
+}
+
+func ReachTaskOverworldWarpWorker(q Q, t T) {
+	var err error
+
+	fmt.Printf("%s: overworld warp worker!\n", t.AreaID)
+
+	var a *Area
+	a = createAreaIfNotExists(
+		t,
+		func(t T, e *System) {
+			copy(e.WRAM[:], t.EntranceWRAM[:])
+			copy(e.VRAM[:], t.EntranceVRAM[:])
+
+			wram := (*e.WRAM)[:]
+
+			// if uint16(st) == 0xA7 {
+			// 	e.LoggerCPU = os.Stdout
+			// }
+
+			if read8(wram, 0x10) != 0x09 {
+				panic("expected module $09")
+			}
+			// move to warp submodule (from LW to DW):
+			write8(wram, 0x11, 0x23)
+
+			// take the first warp coord and move Link there:
+			c := t.OWWarps[0]
+			linkX, linkY := t.AreaID.AbsXY(c)
+			write16(wram, 0x22, uint16(linkX))
+			write16(wram, 0x20, uint16(linkY))
+
+			// run frames until back to module $09:
+			for i := 0; i < 512; i++ {
+				if err = e.ExecAt(b00RunSingleFramePC, donePC); err != nil {
+					panic(err)
+				}
+
+				// f++
+				// fmt.Printf(
+				// 	"f%04d: %02X %02X %02X\n",
+				// 	f,
+				// 	read8(wram, 0x010),
+				// 	read8(wram, 0x011),
+				// 	read8(wram, 0x0B0),
+				// )
+
+				// wait until module 09 or 0B (overworld):
+				if m := read8(wram, 0x10); m == 0x09 || m == 0x0B {
+					// wait until submodule goes back to 0:
+					if read8(wram, 0x011) == 0x00 {
+						break
+					}
+				}
+			}
+
+			// verify module, submodule:
+			if read8(wram, 0x10) != 0x09 {
+				panic("expected module $09")
+			}
+			if read8(wram, 0x11) != 0x00 {
+				panic("expected submodule $00")
+			}
+
+			// verify we're in the appropriate world:
+			if got, expected := AreaID(read8(wram, 0x8A)), t.AreaID; got != expected {
+				panic(fmt.Sprintf("expected areaID to be %02X, got %02X\n", uint8(expected), uint8(got)))
+			}
+			// e.LoggerCPU = nil
+		},
+	)
+
+	if !a.IsLoaded {
+		return
+	}
+
+	// wram := a.WRAM[:]
+
+	for _, c := range t.OWWarps {
+		// pick arbitrary direction; doesn't matter much:
+		t.OWSS.c = c
+		t.OWSS.d = DirSouth
 
 		a.overworldFloodFill(q, t)
 	}
@@ -495,6 +560,7 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 	m := a.Tiles[:]
 
 	areaEdges := map[AreaID][]OWEdge{}
+	warps := map[AreaID][]OWCoord{}
 
 	for len(lifo) > 0 {
 		s := lifo[len(lifo)-1]
@@ -560,8 +626,22 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 			}
 		}
 
-		// TODO: deep water
-		// TODO: mirroring between LW and DW
+		if vt, ok := a.GetMap16At(c); ok {
+			switch vt {
+			case 0x0212: // warp:
+				if a.AreaID&0x40 == 0x40 {
+					panic("cannot warp from DW!")
+				}
+				// set DW bit:
+				na := a.AreaID | 0x40
+				// queue up a warp:
+				warps[na] = append(warps[na], c)
+			}
+		}
+
+		// TODO: mirroring from DW to LW
+		// TODO: jumping off ledges into pits
+		// TODO: hookshot across DM bridge
 
 		if !canTraverse {
 			continue
@@ -592,7 +672,7 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 
 	// submit one task for each area-edge pair:
 	for na, el := range areaEdges {
-		fmt.Printf("%s: submit overworld task for %s with %d edges\n", a.AreaID, na, len(el))
+		fmt.Printf("%s: submit overworld edge task for %s with %d edges\n", a.AreaID, na, len(el))
 		// correct the AreaID to account for large areas:
 		q.SubmitTask(&ReachTask{
 			Mode:            ModeOverworld,
@@ -607,6 +687,25 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 
 			AreaID:  na,
 			OWEdges: el,
-		}, ReachTaskOverworldWorker)
+		}, ReachTaskOverworldEdgeWorker)
+	}
+
+	for na, wl := range warps {
+		fmt.Printf("%s: submit overworld warp task for %s with %d warps\n", a.AreaID, na, len(wl))
+		// correct the AreaID to account for large areas:
+		q.SubmitTask(&ReachTask{
+			Mode:            ModeOverworld,
+			Rooms:           t.Rooms,
+			RoomsLock:       t.RoomsLock,
+			Areas:           t.Areas,
+			AreasLock:       t.AreasLock,
+			InitialEmulator: t.InitialEmulator,
+
+			EntranceWRAM: &a.WRAMAfterLoaded,
+			EntranceVRAM: &a.VRAMAfterLoaded,
+
+			AreaID:  na,
+			OWWarps: wl,
+		}, ReachTaskOverworldWarpWorker)
 	}
 }

@@ -23,6 +23,14 @@ func (a AreaID) RowCol() (row, col int) {
 	return
 }
 
+func (a AreaID) AbsXY(c OWCoord) (absX, absY int) {
+	row, col := c.RowCol()
+	arow, acol := a.RowCol()
+	absY = (arow*0x40 + row) * 8
+	absX = (acol*0x40 + col) * 8
+	return
+}
+
 type Area struct {
 	AreaID AreaID
 
@@ -70,9 +78,7 @@ type AreaEntrance struct {
 }
 
 func (a *Area) RowCol(c OWCoord) (row, col int) {
-	row = int((c & 0x3F80) >> 7)
-	col = int(c & 0x7F)
-	return
+	return c.RowCol()
 }
 
 func (a *Area) Traverse(c OWCoord, d Direction, inc int) (OWCoord, Direction, bool) {
@@ -128,7 +134,7 @@ func (a *Area) NeighborEdge(c OWCoord, d Direction) (absX, absY int, na AreaID, 
 	}
 
 	row, col := a.RowCol(c)
-	absX, absY = a.AbsXY(c)
+	absX, absY = a.AbsTileXY(c)
 
 	// we move by 2 here to skip 1-tile collision borders around certain OW areas, e.g. north side of OW$10
 	switch d {
@@ -172,11 +178,37 @@ func (a *Area) NeighborEdge(c OWCoord, d Direction) (absX, absY int, na AreaID, 
 	return
 }
 
-func (a *Area) AbsXY(c OWCoord) (absX, absY int) {
+func (a *Area) AbsTileXY(c OWCoord) (absX, absY int) {
 	row, col := a.RowCol(c)
 	arow, acol := a.AreaID.RowCol()
 	absY = arow*0x40 + row
 	absX = acol*0x40 + col
+	return
+}
+
+func (a *Area) AbsXY(c OWCoord) (absX, absY int) {
+	row, col := a.RowCol(c)
+	arow, acol := a.AreaID.RowCol()
+	absY = (arow*0x40 + row) * 8
+	absX = (acol*0x40 + col) * 8
+	return
+}
+
+func (a *Area) GetMap16At(c OWCoord) (vt uint16, ok bool) {
+	row, col := a.RowCol(c)
+
+	// only works for the top-left coord of each map16 block:
+	if row&1 != 0 || col&1 != 0 {
+		return 0, false
+	}
+
+	ok = true
+	row >>= 1
+	col >>= 1
+
+	map16 := a.WRAM[0x2000:]
+	vt = read16(map16, uint32(row)<<7|uint32(col)<<1)
+
 	return
 }
 
