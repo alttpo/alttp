@@ -21,6 +21,8 @@ import (
 	"github.com/alttpo/snes/asm"
 	"github.com/alttpo/snes/mapping/lorom"
 	"golang.org/x/image/draw"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/inconsolata"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -517,15 +519,20 @@ func main() {
 		// condense all maps into big atlas images:
 		if true {
 			func() {
+				black := image.NewUniform(color.RGBA{0, 0, 0, 255})
+				white := image.NewUniform(color.RGBA{255, 255, 255, 255})
+
 				// entire overworld is 512x512 8px tiles:
 				ow := [2]*image.NRGBA{
 					image.NewNRGBA(image.Rect(0, 0, 4096, 4096)),
 					image.NewNRGBA(image.Rect(0, 0, 4096, 4096)),
 				}
+
 				for aid, a := range areasMap {
 					row, col := aid.RowCol()
+					g := ow[(a.AreaID&0x40)>>6]
 					draw.Draw(
-						ow[(a.AreaID&0x40)>>6],
+						g,
 						image.Rect(
 							col*0x40*8,
 							row*0x40*8,
@@ -536,6 +543,31 @@ func main() {
 						image.Point{},
 						draw.Over,
 					)
+
+					// draw area number in top-left:
+					stStr := fmt.Sprintf("%02X", uint8(aid))
+					arow, acol := aid.RowCol()
+					stx := acol * 0x40 * 8
+					sty := arow * 0x40 * 8
+					(&font.Drawer{
+						Dst:  g,
+						Src:  black,
+						Face: inconsolata.Bold8x16,
+						Dot: fixed.Point26_6{
+							X: fixed.I(stx + 5),
+							Y: fixed.I(sty + 5 + 12),
+						},
+					}).DrawString(stStr)
+					(&font.Drawer{
+						Dst:  g,
+						Src:  white,
+						Face: inconsolata.Bold8x16,
+						Dot: fixed.Point26_6{
+							X: fixed.I(stx + 4),
+							Y: fixed.I(sty + 4 + 12),
+						},
+					}).DrawString(stStr)
+
 				}
 				exportPNG("ow-lw.png", ow[0])
 				exportPNG("ow-dw.png", ow[1])
