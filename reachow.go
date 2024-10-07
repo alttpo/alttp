@@ -347,6 +347,7 @@ func createArea(t T, e *System) (a *Area) {
 	e.WRAM = &a.WRAM
 
 	wram := (*e.WRAM)[:]
+	map16 := wram[0x2000:]
 
 	// grab area width,height extents in tiles:
 	a.Height = int(read16(wram, 0x070A)+0x10) >> 3
@@ -380,7 +381,10 @@ func createArea(t T, e *System) (a *Area) {
 			t16 := e.Bus.Read16(alttp.Overworld_SecretTileType + uint32(v&0x0F))
 			fmt.Printf("%s: secret reveal at %04X: %04X\n", a.AreaID, m16, t16)
 			// do the tile replacement:
-			write16(wram[0x2000:], uint32(m16), t16)
+			write16(map16, uint32(m16), t16)
+			if t16 == 0x0DAE {
+				write16(map16, uint32(m16)+2, 0x0DAF)
+			}
 		}
 	}
 
@@ -388,7 +392,7 @@ func createArea(t T, e *System) (a *Area) {
 	for row := uint32(0); row < ah; row += 2 {
 		for col := uint32(0); col < aw; col += 2 {
 			// read map16 blocks from WRAM at $7E2000:
-			m16 := uint32(read16(wram[0x2000:], (row*0x40+col))) << 3
+			m16 := uint32(read16(map16, (row*0x40+col))) << 3
 
 			// translate into map8 blocks via Map16Definitions:
 			df := [4]uint16{
