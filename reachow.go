@@ -130,29 +130,8 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 		uint16(t.Y),
 	)
 
-	// linkX := read16(wram, 0x22)
-	// linkY := read16(wram, 0x20)
-	// fmt.Printf(
-	// 	"%s: link at abs %04X, %04X\n",
-	// 	a.AreaID,
-	// 	linkX,
-	// 	linkY,
-	// )
-
-	// fmt.Printf(
-	// 	"%s: link at rel %04X, %04X\n",
-	// 	a.AreaID,
-	// 	linkX-ax,
-	// 	linkY-ay,
-	// )
-
-	// set up initial scan state at where Link is:
-	// se := OWSS{
-	// 	c: OWCoord(((linkY-ay)>>3)<<7 + (linkX-ax)>>3),
-	// 	d: DirSouth,
-	// }
 	t.OWSS = OWSS{
-		c: OWCoord(((t.Y-ay)>>3+6)<<7 + (t.X-ax)>>3),
+		c: OWCoord(((t.Y-ay)>>3+5)<<7 + (t.X-ax)>>3),
 		d: DirSouth,
 		s: OWStateWalk,
 	}
