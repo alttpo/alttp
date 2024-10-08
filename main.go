@@ -537,51 +537,53 @@ func main() {
 		fmt.Println("wait")
 		q.Wait()
 
-		// after the initial round of scans is complete, go back through the overworld and find previously
-		// unreachable DW areas with a reachable counterpart in the same LW area (for mirroring):
-		for dwaid, dwa := range areasMap {
-			if dwaid&0x40 == 0 {
-				continue
-			}
+		for runs := 0; runs < 3; runs++ {
+			// after the initial round of scans is complete, go back through the overworld and find previously
+			// unreachable DW areas with a reachable counterpart in the same LW area (for mirroring):
+			for dwaid, dwa := range areasMap {
+				if dwaid&0x40 == 0 {
+					continue
+				}
 
-			// find LW counterpart:
-			lwa, ok := areasMap[dwaid&0x3F]
-			if !ok {
-				continue
-			}
+				// find LW counterpart:
+				lwa, ok := areasMap[dwaid&0x3F]
+				if !ok {
+					continue
+				}
 
-			// scan for mirrorable areas:
-			mirrors := make([]OWCoord, 0, 0x100)
-			for row := 0; row < dwa.Height; row++ {
-				for col := 0; col < dwa.Width; col++ {
-					c := RowColToOWCoord(row, col)
-					// is DW tile reachable?
-					if dwa.Reachable[c] != 0x01 && dwa.Reachable[c] == dwa.Tiles[c] {
-						// is LW tile not reachable but could be?
-						if lwa.Reachable[c] == 0x01 && lwa.isAlwaysWalkable(lwa.Tiles[c]) {
-							// LW tile is unreachable; we have a mirror entry point from DW to LW:
-							mirrors = append(mirrors, c)
+				// scan for mirrorable areas:
+				mirrors := make([]OWCoord, 0, 0x100)
+				for row := 0; row < dwa.Height; row++ {
+					for col := 0; col < dwa.Width; col++ {
+						c := RowColToOWCoord(row, col)
+						// is DW tile reachable?
+						if dwa.Reachable[c] != 0x01 && dwa.Reachable[c] == dwa.Tiles[c] {
+							// is LW tile not reachable but could be?
+							if lwa.Reachable[c] == 0x01 && lwa.isAlwaysWalkable(lwa.Tiles[c]) {
+								// LW tile is unreachable; we have a mirror entry point from DW to LW:
+								mirrors = append(mirrors, c)
+							}
 						}
 					}
 				}
-			}
 
-			if len(mirrors) > 0 {
-				q.SubmitTask(
-					&ReachTask{
-						Mode:      ModeOverworld,
-						Rooms:     roomsMap,
-						RoomsLock: &roomsLock,
-						Areas:     areasMap,
-						AreasLock: &areasLock,
-						AreaID:    lwa.AreaID,
-						OWWarps:   mirrors,
-					},
-					ReachTaskOverworldMirroredWorker,
-				)
+				if len(mirrors) > 0 {
+					q.SubmitTask(
+						&ReachTask{
+							Mode:      ModeOverworld,
+							Rooms:     roomsMap,
+							RoomsLock: &roomsLock,
+							Areas:     areasMap,
+							AreasLock: &areasLock,
+							AreaID:    lwa.AreaID,
+							OWWarps:   mirrors,
+						},
+						ReachTaskOverworldMirroredWorker,
+					)
+				}
 			}
+			q.Wait()
 		}
-		q.Wait()
 
 		fmt.Println("close")
 		q.Close()
