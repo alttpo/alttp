@@ -7,9 +7,17 @@ import (
 	"unsafe"
 )
 
+type OWState int
+
+const (
+	OWStateWalk OWState = iota
+	OWStateFall
+)
+
 type OWSS struct {
 	c OWCoord
 	d Direction
+	s OWState
 }
 
 type OWEdge struct {
@@ -146,6 +154,7 @@ func ReachTaskOverworldFromUnderworldWorker(q Q, t T) {
 	t.OWSS = OWSS{
 		c: OWCoord(((t.Y-ay)>>3+6)<<7 + (t.X-ax)>>3),
 		d: DirSouth,
+		s: OWStateWalk,
 	}
 
 	a.overworldFloodFill(q, t)
@@ -228,6 +237,7 @@ func ReachTaskOverworldEdgeWorker(q Q, t T) {
 
 		t.OWSS.c = RowColToOWCoord(row, col)
 		t.OWSS.d = ed.d
+		t.OWSS.s = OWStateWalk
 
 		a.overworldFloodFill(q, t)
 	}
@@ -313,6 +323,7 @@ func ReachTaskOverworldWarpWorker(q Q, t T) {
 		// pick arbitrary direction; doesn't matter much:
 		t.OWSS.c = c
 		t.OWSS.d = DirSouth
+		t.OWSS.s = OWStateWalk
 
 		a.overworldFloodFill(q, t)
 	}
@@ -465,7 +476,7 @@ func createArea(t T, e *System) (a *Area) {
 		fmt.Printf("%s: pit entrance at map16=%04X, id=%02X at %04X\n", a.AreaID, m16pos, ent.EntranceID, uint16(ent.OWCoord))
 
 		for y := 0; y < 2; y++ {
-			for x := 0; x < 2; x++ {
+			for x := 0; x < 4; x++ {
 				a.TileEntrance[ent.OWCoord+OWCoord(y*0x80)+OWCoord(x)] = &a.Entrances[i]
 			}
 		}
@@ -567,11 +578,12 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 	warps := map[AreaID][]OWCoord{}
 
 	for len(lifo) > 0 {
-		s := lifo[len(lifo)-1]
+		st := lifo[len(lifo)-1]
 		lifo = lifo[:len(lifo)-1]
 
-		c := s.c
-		d := s.d
+		c, d, s := st.c, st.d, st.s
+
+		// determine neighbor tile depending on facing direction:
 		cn := c
 		switch d {
 		case DirNorth:
@@ -591,59 +603,85 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 
 		canTraverse := false
 		canTurn := false
+		traverseBy := 1
 
 		v, vn := m[c], m[cn]
-		if v == 0x20 {
-			// pit:
-			a.Reachable[c] = v
-			a.Reachable[cn] = v
-		} else if v == 0x08 {
-			// deep water:
-			canTraverse = true
-			canTurn = true
-		} else if v == 0x52 || v == 0x53 {
-			// gray rock and black rock:
-			canTraverse = true
-			canTurn = true
-		} else if v == 0x55 || v == 0x56 {
-			// large gray rock and large black rock:
-			canTraverse = true
-			canTurn = true
-		} else if v == 0x57 || v == 0x57 {
-			// bonk rocks:
-			canTraverse = true
-			canTurn = true
-		} else if a.isAlwaysWalkable(v) && a.isAlwaysWalkable(vn) {
-			canTraverse = true
-			canTurn = true
 
-			if ent, ok := a.TileEntrance[c]; ok {
-				fmt.Printf("%s: underworld entrance %02X at %04X\n", a.AreaID, ent.EntranceID, uint16(c))
-				if !ent.Used {
-					ent.Used = true
-					q.SubmitTask(&ReachTask{
-						Mode:            ModeUnderworld,
-						Rooms:           t.Rooms,
-						RoomsLock:       t.RoomsLock,
-						Areas:           t.Areas,
-						AreasLock:       t.AreasLock,
-						InitialEmulator: t.InitialEmulator,
-						EntranceID:      ent.EntranceID,
-					}, ReachTaskFromEntranceWorker)
+		switch s {
+		case OWStateWalk:
+			if v == 0x20 {
+				// pit:
+				canTraverse = true
+				traverseBy = 0
+			} else if v == 0x08 {
+				// deep water:
+				canTraverse = true
+				canTurn = true
+			} else if v == 0x52 || v == 0x53 {
+				// gray rock and black rock:
+				canTraverse = true
+				canTurn = true
+			} else if v == 0x55 || v == 0x56 {
+				// large gray rock and large black rock:
+				canTraverse = true
+				canTurn = true
+			} else if v == 0x57 {
+				// bonk rocks:
+				canTraverse = true
+				canTurn = true
+			} else if v == 0x29 && vn == 0x29 {
+				// 29 - South ledge
+				canTraverse = true
+				canTurn = false
+				traverseBy = 5
+				s = OWStateFall
+			} else if a.isAlwaysWalkable(v) && a.isAlwaysWalkable(vn) {
+				canTraverse = true
+				canTurn = true
+			}
+
+			if vt, ok := a.GetMap16At(c); ok {
+				switch vt {
+				case 0x0212: // warp:
+					if a.AreaID&0x40 == 0x40 {
+						panic("cannot warp from DW!")
+					}
+					// set DW bit:
+					na := a.AreaID | 0x40
+					// queue up a warp:
+					warps[na] = append(warps[na], c)
 				}
 			}
-		}
-
-		if vt, ok := a.GetMap16At(c); ok {
-			switch vt {
-			case 0x0212: // warp:
-				if a.AreaID&0x40 == 0x40 {
-					panic("cannot warp from DW!")
-				}
-				// set DW bit:
-				na := a.AreaID | 0x40
-				// queue up a warp:
-				warps[na] = append(warps[na], c)
+		case OWStateFall:
+			// Link is falling from a ledge and has already moved at least 5 tiles:
+			if a.isAlwaysWalkable(v) && a.isAlwaysWalkable(vn) {
+				// stop falling:
+				canTraverse = true
+				canTurn = true
+				traverseBy = 0
+				delete(a.TilesVisited, c)
+				delete(a.TilesVisited, cn)
+				s = OWStateWalk
+			} else if v == 0x20 && vn == 0x20 {
+				// pit:
+				canTraverse = true
+				canTurn = false
+				traverseBy = 0
+				delete(a.TilesVisited, c)
+				delete(a.TilesVisited, cn)
+				s = OWStateWalk
+			} else if v == 0x08 {
+				// deep water:
+				canTraverse = true
+				canTurn = false
+				traverseBy = 0
+				delete(a.TilesVisited, c)
+				delete(a.TilesVisited, cn)
+				s = OWStateWalk
+			} else {
+				// continue falling:
+				canTraverse = true
+				canTurn = false
 			}
 		}
 
@@ -656,7 +694,24 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 		}
 
 		a.Reachable[c] = v
-		a.Reachable[cn] = v
+		a.Reachable[cn] = vn
+
+		// check for an entrance where we are:
+		if ent, ok := a.TileEntrance[c]; ok {
+			fmt.Printf("%s: underworld entrance %02X at %04X\n", a.AreaID, ent.EntranceID, uint16(c))
+			if !ent.Used {
+				ent.Used = true
+				q.SubmitTask(&ReachTask{
+					Mode:            ModeUnderworld,
+					Rooms:           t.Rooms,
+					RoomsLock:       t.RoomsLock,
+					Areas:           t.Areas,
+					AreasLock:       t.AreasLock,
+					InitialEmulator: t.InitialEmulator,
+					EntranceID:      ent.EntranceID,
+				}, ReachTaskFromEntranceWorker)
+			}
+		}
 
 		// transition to neighboring area at the edges:
 		if absX, absY, na, ok := a.NeighborEdge(c, d); ok {
@@ -667,14 +722,14 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 
 		if canTurn {
 			if c, d, ok := a.Traverse(c, d.RotateCCW(), 1); ok {
-				lifo = append(lifo, OWSS{c: c, d: d})
+				lifo = append(lifo, OWSS{c: c, d: d, s: s})
 			}
 			if c, d, ok := a.Traverse(c, d.RotateCW(), 1); ok {
-				lifo = append(lifo, OWSS{c: c, d: d})
+				lifo = append(lifo, OWSS{c: c, d: d, s: s})
 			}
 		}
-		if c, d, ok := a.Traverse(c, d, 1); ok {
-			lifo = append(lifo, OWSS{c: c, d: d})
+		if c, d, ok := a.Traverse(c, d, traverseBy); ok {
+			lifo = append(lifo, OWSS{c: c, d: d, s: s})
 		}
 	}
 

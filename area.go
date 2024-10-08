@@ -379,16 +379,17 @@ func (a *Area) DrawOverlays() {
 	yellowTint := image.NewUniform(color.NRGBA{255, 255, 0, 192})
 	for _, ent := range a.Entrances {
 		row, col := a.RowCol(ent.OWCoord)
-		wh := 4
+
+		w, h := 4, 4
 		if ent.IsPit {
-			wh = 2
+			h = 2
 		}
 
 		drawShadowedString(
 			a.RenderedNRGBA,
 			yellowTint,
 			fixed.Point26_6{
-				X: fixed.I(int(col*8) + (wh-2)*4),
+				X: fixed.I(int(col*8) + (w-2)*4),
 				Y: fixed.I(int(row*8) - 2),
 			},
 			fmt.Sprintf("%02X", uint8(ent.EntranceID)),
@@ -398,16 +399,16 @@ func (a *Area) DrawOverlays() {
 			yellowTint,
 			col*8,
 			row*8,
-			8*wh,
-			8*wh,
+			8*w,
+			8*h,
 		)
 		drawOutlineBox(
 			a.RenderedNRGBA,
 			yellowTint,
 			col*8-1,
 			row*8-1,
-			8*wh+2,
-			8*wh+2,
+			8*w+2,
+			8*h+2,
 		)
 	}
 }

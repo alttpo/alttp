@@ -567,7 +567,6 @@ func main() {
 							Y: fixed.I(sty + 4 + 12),
 						},
 					}).DrawString(stStr)
-
 				}
 				exportPNG("ow-lw.png", ow[0])
 				exportPNG("ow-dw.png", ow[1])
