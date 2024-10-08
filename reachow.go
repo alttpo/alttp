@@ -657,6 +657,14 @@ func (a *Area) overworldFloodFill(q Q, t T) {
 				// 29 - South ledge
 				canTraverse = true
 				canTurn = false
+				d = DirSouth
+				traverseBy = 5
+				s = OWStateFall
+			} else if v == 0x28 && vn == 0x28 {
+				// 28 - North ledge
+				canTraverse = true
+				canTurn = false
+				d = DirNorth
 				traverseBy = 5
 				s = OWStateFall
 			} else if a.isAlwaysWalkable(v) && a.isAlwaysWalkable(vn) {
