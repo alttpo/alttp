@@ -71,6 +71,8 @@ type ReachTask struct {
 
 	OWEdges []OWEdge
 	OWWarps []OWCoord
+
+	Transport uint8
 }
 
 type T = *ReachTask

@@ -474,6 +474,23 @@ func main() {
 
 		q := taskqueue.NewQ[*ReachTask](nWorkers, 0x2000)
 
+		// activate all overworld overlays to open up entrances:
+		for _, aid := range []uint8{
+			// light world:
+			0x02, 0x07,
+			0x13, 0x14,
+			0x18, 0x1B, 0x1E,
+			0x3B,
+			// dark world:
+			0x40, 0x43, 0x45, 0x47,
+			0x58, 0x5B, 0x5E,
+			0x62,
+			0x70,
+			0x7B,
+		} {
+			e.WRAM[0xF280+uint32(aid)] |= 0x20
+		}
+
 		// eIDmin, eIDmax := uint8(0), uint8(0x84)
 		for eID := entranceMin; eID <= entranceMax; eID++ {
 			if excludeEntrances[eID] {
@@ -502,7 +519,23 @@ func main() {
 		fmt.Println("wait")
 		q.Wait()
 
-		// TODO: LW bird drop-off locations (e.g. MM entrance)
+		// Load all LW flute transport locations:
+		for i := 0; i < 8; i++ {
+			q.SubmitTask(
+				&ReachTask{
+					Mode:            ModeOverworld,
+					Rooms:           roomsMap,
+					RoomsLock:       &roomsLock,
+					Areas:           areasMap,
+					AreasLock:       &areasLock,
+					InitialEmulator: &e,
+					Transport:       uint8(i),
+				},
+				ReachTaskOverworldTransportWorker,
+			)
+		}
+		fmt.Println("wait")
+		q.Wait()
 
 		// after the initial round of scans is complete, go back through the overworld and find previously
 		// unreachable DW areas with a reachable counterpart in the same LW area (for mirroring):

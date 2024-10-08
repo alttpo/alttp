@@ -329,6 +329,104 @@ func ReachTaskOverworldWarpWorker(q Q, t T) {
 	}
 }
 
+func ReachTaskOverworldTransportWorker(q Q, t T) {
+	var err error
+
+	fmt.Printf("%s: overworld transport worker!\n", t.AreaID)
+
+	e := &System{}
+	e.InitEmulatorFrom(t.InitialEmulator)
+
+	wram := (*e.WRAM)[:]
+
+	// move to flute menu module/submodule:
+	write8(wram, 0x10, 0x0E)
+	write8(wram, 0x11, 0x0A)
+	write8(wram, 0x0200, 0x07) // FluteMenu_LoadSelectedScreen
+	// return to module 09
+	write8(wram, 0x010C, 0x09)
+
+	// transport destination to load:
+	write8(wram, 0x1AF0, t.Transport)
+
+	// run frames until back to module $09:
+	for i := 0; i < 512; i++ {
+		if err = e.ExecAt(b00RunSingleFramePC, donePC); err != nil {
+			panic(err)
+		}
+
+		// f++
+		// fmt.Printf(
+		// 	"f%04d: %02X %02X %02X\n",
+		// 	f,
+		// 	read8(wram, 0x010),
+		// 	read8(wram, 0x011),
+		// 	read8(wram, 0x0B0),
+		// )
+
+		// wait until module 09 or 0B (overworld):
+		if m := read8(wram, 0x10); m == 0x09 || m == 0x0B {
+			// wait until submodule goes back to 0:
+			if read8(wram, 0x011) == 0x00 {
+				break
+			}
+		}
+	}
+
+	// verify module, submodule:
+	if read8(wram, 0x10) != 0x09 {
+		panic("expected module $09")
+	}
+	if read8(wram, 0x11) != 0x00 {
+		panic("expected submodule $00")
+	}
+
+	// e.LoggerCPU = nil
+
+	t.AreasLock.Lock()
+	a, ok := t.Areas[AreaID(read8(wram, 0x8A))]
+	if !ok {
+		panic("missing area to transport to!")
+	}
+	t.AreasLock.Unlock()
+
+	if !a.IsLoaded {
+		return
+	}
+
+	ax := read16(wram, 0x070C) << 3
+	ay := read16(wram, 0x0708)
+
+	fmt.Printf(
+		"%s: area at abs %04X, %04X\n",
+		a.AreaID,
+		ax,
+		ay,
+	)
+
+	linkX := read16(wram, 0x22)
+	linkY := read16(wram, 0x20)
+	fmt.Printf(
+		"%s: link at abs %04X, %04X\n",
+		a.AreaID,
+		linkX,
+		linkY,
+	)
+
+	fmt.Printf(
+		"%s: link at rel %04X, %04X\n",
+		a.AreaID,
+		linkX-ax,
+		linkY-ay,
+	)
+
+	// set up initial scan state at where Link is:
+	t.OWSS.c = OWCoord(((linkY-ay)>>3)<<7 + (linkX-ax)>>3)
+	t.OWSS.d = DirSouth
+
+	a.overworldFloodFill(q, t)
+}
+
 func ReachTaskOverworldMirroredWorker(q Q, t T) {
 	// area must already exist and must be in the a light world:
 	if t.AreaID >= 0x40 {
@@ -555,11 +653,6 @@ func createArea(t T, e *System) (a *Area) {
 			}
 		}
 	}
-	// TODO: open GT stairs
-	// TODO: open TR entrance
-	// TODO: open MM entrance
-	// TODO: open TT entrance
-	// TODO: why no entrance 0A for DP??
 
 	if true {
 		os.WriteFile(
