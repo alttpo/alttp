@@ -329,6 +329,30 @@ func ReachTaskOverworldWarpWorker(q Q, t T) {
 	}
 }
 
+func ReachTaskOverworldMirroredWorker(q Q, t T) {
+	// area must already exist and must be in the a light world:
+	if t.AreaID >= 0x40 {
+		panic("cannot mirror to DW")
+	}
+
+	t.AreasLock.Lock()
+	a, ok := t.Areas[t.AreaID]
+	if !ok {
+		panic(fmt.Sprintf("light world %s area must exist", t.AreaID))
+	}
+	t.AreasLock.Unlock()
+
+	t.InitialEmulator = a.e
+
+	fmt.Printf("%s: found %d mirror destinations\n", a.AreaID, len(t.OWWarps))
+	for _, c := range t.OWWarps {
+		t.OWSS.c = c
+		t.OWSS.d = DirNorth
+		t.OWSS.s = OWStateWalk
+		a.overworldFloodFill(q, t)
+	}
+}
+
 func createArea(t T, e *System) (a *Area) {
 	a = &Area{
 		AreaID:          t.AreaID,
