@@ -364,10 +364,10 @@ func ReachTaskOverworldTransportWorker(q Q, t T) {
 
 	t.AreasLock.Lock()
 	a, ok := t.Areas[AreaID(read8(wram, 0x8A))]
+	t.AreasLock.Unlock()
 	if !ok {
 		panic("missing area to transport to!")
 	}
-	t.AreasLock.Unlock()
 
 	if !a.IsLoaded {
 		return
