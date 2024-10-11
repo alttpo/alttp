@@ -66,6 +66,8 @@ type romPointers struct {
 	OverworldData_HiddenItems uint32 // 0x1B_C2F9
 	Overworld_SecretTileType  uint32 // 0x1B_C89C
 
+	Sprite_ShowMessageUnconditional uint32 // 0x05_E219
+
 	SpriteHitBox_OffsetXLow  uint32
 	SpriteHitBox_OffsetXHigh uint32
 	SpriteHitBox_Width       uint32
@@ -129,6 +131,8 @@ var alttpJP10 = romPointers{
 
 	OverworldData_HiddenItems: 0x1B_C2F9,
 	Overworld_SecretTileType:  0x1B_C89C,
+
+	Sprite_ShowMessageUnconditional: 0x05_E219,
 
 	SpriteHitBox_OffsetXLow:  0x06_F735,
 	SpriteHitBox_OffsetXHigh: 0x06_F735 + 0x20,
@@ -195,6 +199,8 @@ var alttpUS = romPointers{
 
 	OverworldData_HiddenItems: 0x1B_C2F9, // confirmed
 	Overworld_SecretTileType:  0x1B_C89C, // confirmed
+
+	Sprite_ShowMessageUnconditional: 0x05_E219, // confirmed
 
 	SpriteHitBox_OffsetXLow:  0x06_F72F, // confirmed
 	SpriteHitBox_OffsetXHigh: 0x06_F72F + 0x20,

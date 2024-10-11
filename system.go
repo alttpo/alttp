@@ -282,11 +282,21 @@ func (s *System) InitBusHiROM() (err error) {
 			bank20|0x1FFF,
 			func(addr uint32) uint8 { return s.SRAM[((addr&0x1F_0000)>>13)|(addr-bank20)] },
 		)
+		s.Bus.AttachWriter(
+			bank20,
+			bank20|0x1FFF,
+			func(addr uint32, val uint8) { s.SRAM[((addr&0x1F_0000)>>13)|(addr-bank20)] = val },
+		)
 		bankA0 := (b+0x80)<<16 | 0x6000
 		s.Bus.AttachReader(
 			bankA0,
 			bankA0|0x1FFF,
 			func(addr uint32) uint8 { return s.SRAM[((addr&0x1F_0000)>>13)|(addr-bankA0)] },
+		)
+		s.Bus.AttachWriter(
+			bankA0,
+			bankA0|0x1FFF,
+			func(addr uint32, val uint8) { s.SRAM[((addr&0x1F_0000)>>13)|(addr-bankA0)] = val },
 		)
 	}
 

@@ -189,23 +189,86 @@ func ReachTaskFromEntranceWorker(q Q, t T) {
 
 	reachTaskFloodfill(q, t, room)
 
-	room.Mutex.Lock()
-	// outline Link's starting position with entranceID
-	drawOutlineBox(
-		room.RenderedNRGBA,
-		image.NewUniform(color.RGBA{255, 255, 0, 255}),
-		int(t.SE.c.Col())*8,
-		int(t.SE.c.Row())*8,
-		16,
-		16,
-	)
-	drawShadowedString(
-		room.RenderedNRGBA,
-		image.NewUniform(color.RGBA{255, 255, 0, 255}),
-		fixed.Point26_6{X: fixed.I(int(t.SE.c.Col())*8 + 1), Y: fixed.I(int(t.SE.c.Row())*8 + 14)},
-		fmt.Sprintf("%02X", uint8(t.EntranceID)),
-	)
-	room.Mutex.Unlock()
+	if drawOverlays {
+		room.Mutex.Lock()
+		// outline Link's starting position with entranceID
+		drawOutlineBox(
+			room.RenderedNRGBA,
+			image.NewUniform(color.RGBA{255, 255, 0, 255}),
+			int(t.SE.c.Col())*8,
+			int(t.SE.c.Row())*8,
+			16,
+			16,
+		)
+		drawShadowedString(
+			room.RenderedNRGBA,
+			image.NewUniform(color.RGBA{255, 255, 0, 255}),
+			fixed.Point26_6{X: fixed.I(int(t.SE.c.Col())*8 + 1), Y: fixed.I(int(t.SE.c.Row())*8 + 14)},
+			fmt.Sprintf("%02X", uint8(t.EntranceID)),
+		)
+		room.Mutex.Unlock()
+	}
+}
+
+func ReachTaskRoomFromCurrentStateWorker(q Q, t T) {
+	var err error
+
+	e := &System{}
+	if err = e.InitEmulatorFrom(t.InitialEmulator); err != nil {
+		panic(err)
+	}
+
+	wram := (e.WRAM)[:]
+
+	// read initial entrance supertile:
+	t.Supertile = Supertile(read16(wram, 0xA0))
+
+	// find Link's entry point:
+	linkY := read16(wram, 0x0020)
+	linkX := read16(wram, 0x0022)
+	linkL := read16(wram, 0x00EE)
+	linkC := AbsToMapCoord(linkX, linkY, linkL)
+	linkD := Direction(read8(wram, 0x002F) >> 1)
+
+	t.SE.c = linkC
+	t.SE.d = linkD
+	t.SE.s = reachStateWalk
+
+	// adjust Link position to get out of bed:
+	// os.WriteFile("wram.bin", wram, 0644)
+	linkM := uint32((linkY&0x01F8)<<4 | (linkX&0x01F8)>>2)
+	tAt := read16(wram[0x2000:], linkM)
+	// part of Link's bed:
+	if tAt == 0x158D {
+		// jump to the right:
+		t.SE.c, _, _ = t.SE.c.MoveBy(DirEast, 4)
+	} else {
+		fmt.Printf("gamestart: tile at %04X = %04X\n", linkM, tAt)
+	}
+
+	room := getOrCreateRoom(t, e)
+
+	reachTaskFloodfill(q, t, room)
+
+	if drawOverlays {
+		room.Mutex.Lock()
+		// outline Link's starting position with entranceID
+		drawOutlineBox(
+			room.RenderedNRGBA,
+			image.NewUniform(color.RGBA{255, 255, 0, 255}),
+			int(t.SE.c.Col())*8,
+			int(t.SE.c.Row())*8,
+			16,
+			16,
+		)
+		drawShadowedString(
+			room.RenderedNRGBA,
+			image.NewUniform(color.RGBA{255, 255, 0, 255}),
+			fixed.Point26_6{X: fixed.I(int(t.SE.c.Col())*8 + 1), Y: fixed.I(int(t.SE.c.Row())*8 + 14)},
+			fmt.Sprintf("%02X", uint8(t.EntranceID)),
+		)
+		room.Mutex.Unlock()
+	}
 }
 
 func getOrCreateRoom(t T, e *System) (room *RoomState) {
@@ -1781,38 +1844,40 @@ func (room *RoomState) renderToNonPaletted(g *image.NRGBA) {
 
 	ComposeToNonPaletted(g, pal, bg1p, bg2p, addColor, halfColor)
 
-	// overlay doors in blue rectangles:
-	clrBlue := image.NewUniform(color.NRGBA{0, 0, 255, 192})
-	for _, door := range room.Doors {
+	if drawOverlays {
+		// overlay doors in blue rectangles:
+		clrBlue := image.NewUniform(color.NRGBA{0, 0, 255, 192})
+		for _, door := range room.Doors {
+			drawShadowedString(
+				g,
+				image.NewUniform(color.RGBA{0, 0, 255, 255}),
+				fixed.Point26_6{X: fixed.I(int(door.Pos.Col()*8) + 8), Y: fixed.I(int(door.Pos.Row()*8) - 2)},
+				fmt.Sprintf("%02X", uint8(door.Type)),
+			)
+			drawOutlineBox(
+				g,
+				image.NewUniform(clrBlue),
+				int(door.Pos.Col()*8),
+				int(door.Pos.Row()*8),
+				4*8,
+				4*8,
+			)
+			drawOutlineBox(
+				g,
+				image.NewUniform(clrBlue),
+				int(door.Pos.Col()*8)-1,
+				int(door.Pos.Row()*8)-1,
+				4*8+2,
+				4*8+2,
+			)
+		}
+
+		// tags:
 		drawShadowedString(
 			g,
-			image.NewUniform(color.RGBA{0, 0, 255, 255}),
-			fixed.Point26_6{X: fixed.I(int(door.Pos.Col()*8) + 8), Y: fixed.I(int(door.Pos.Row()*8) - 2)},
-			fmt.Sprintf("%02X", uint8(door.Type)),
-		)
-		drawOutlineBox(
-			g,
-			image.NewUniform(clrBlue),
-			int(door.Pos.Col()*8),
-			int(door.Pos.Row()*8),
-			4*8,
-			4*8,
-		)
-		drawOutlineBox(
-			g,
-			image.NewUniform(clrBlue),
-			int(door.Pos.Col()*8)-1,
-			int(door.Pos.Row()*8)-1,
-			4*8+2,
-			4*8+2,
+			image.White,
+			fixed.Point26_6{X: fixed.I(32), Y: fixed.I(16)},
+			fmt.Sprintf("%02X %02X", uint8(room.WRAM[0xAE]), uint8(room.WRAM[0xAF])),
 		)
 	}
-
-	// tags:
-	drawShadowedString(
-		g,
-		image.White,
-		fixed.Point26_6{X: fixed.I(32), Y: fixed.I(16)},
-		fmt.Sprintf("%02X %02X", uint8(room.WRAM[0xAE]), uint8(room.WRAM[0xAF])),
-	)
 }

@@ -474,6 +474,8 @@ func main() {
 
 		q := taskqueue.NewQ[*ReachTask](nWorkers, 0x2000)
 
+		wram := (*e.WRAM)[:]
+
 		// activate all overworld overlays to open up entrances:
 		for _, aid := range []uint8{
 			// light world:
@@ -491,31 +493,79 @@ func main() {
 			e.WRAM[0xF280+uint32(aid)] |= 0x20
 		}
 
-		// eIDmin, eIDmax := uint8(0), uint8(0x84)
-		for eID := entranceMin; eID <= entranceMax; eID++ {
-			if excludeEntrances[eID] {
-				fmt.Printf("entrance $%02X skip\n", eID)
-				continue
-			}
+		if false {
+			// eIDmin, eIDmax := uint8(0), uint8(0x84)
+			for eID := entranceMin; eID <= entranceMax; eID++ {
+				if excludeEntrances[eID] {
+					fmt.Printf("entrance $%02X skip\n", eID)
+					continue
+				}
 
-			// skip attract mode cinematic entrances (vanilla only??):
-			if eID >= 0x73 && eID <= 0x75 {
-				fmt.Printf("entrance $%02X skip (assuming only used for intro/attract sequence)\n", eID)
-				continue
+				// skip attract mode cinematic entrances (vanilla only??):
+				if eID >= 0x73 && eID <= 0x75 {
+					fmt.Printf("entrance $%02X skip (assuming only used for intro/attract sequence)\n", eID)
+					continue
+				}
+
+				q.SubmitTask(
+					&ReachTask{
+						EntranceID:      eID,
+						InitialEmulator: &e,
+						Rooms:           roomsMap,
+						RoomsLock:       &roomsLock,
+						Areas:           areasMap,
+						AreasLock:       &areasLock,
+					},
+					ReachTaskFromEntranceWorker,
+				)
+			}
+		}
+
+		{
+			// load module 5 to get game started:
+			write8(wram, 0x10, 0x05)
+			write8(wram, 0x11, 0x00)
+			write8(wram, 0xB0, 0x00)
+			// act like a respawn so we don't get a menu prompt:
+			write8(wram, 0x010A, 0x01)
+			write8(wram, 0x04AA, 0x01)
+
+			// run frames until we get to underworld:
+			// e.LoggerCPU = os.Stdout
+			for i := 0; i < 240; i++ {
+				if err = e.ExecAt(runFramePC, donePC); err != nil {
+					panic(err)
+				}
+
+				m, sm := read8(wram, 0x10), read8(wram, 0x11)
+				if m == 0x07 && sm == 0x00 {
+					break
+				} else if m == 0x1B && sm != 0 {
+					// this should exit a choice menu:
+					write8(wram, 0x11, 0)
+					// choice 0, Link's house:
+					write8(wram, 0x1CE8, 0)
+				}
+			}
+			// e.LoggerCPU = nil
+
+			if m, sm := read8(wram, 0x10), read8(wram, 0x11); m != 0x07 || sm != 0x00 {
+				panic(fmt.Sprintf("did not reach module 07,00; got %02X,%02X", m, sm))
 			}
 
 			q.SubmitTask(
 				&ReachTask{
-					EntranceID:      eID,
-					InitialEmulator: &e,
+					Mode:            ModeUnderworld,
 					Rooms:           roomsMap,
 					RoomsLock:       &roomsLock,
 					Areas:           areasMap,
 					AreasLock:       &areasLock,
+					InitialEmulator: &e,
 				},
-				ReachTaskFromEntranceWorker,
+				ReachTaskRoomFromCurrentStateWorker,
 			)
 		}
+
 		fmt.Println("wait")
 		q.Wait()
 
@@ -1384,13 +1434,6 @@ func setupAlttp(e *System) {
 		a.JSL(fastRomBank | alttp.LoadDefaultTileTypes)
 		a.Comment("Intro_InitializeDefaultGFX#_0CC208")
 		a.JSL(alttp.Intro_InitializeDefaultGFX)
-		//a.Comment("LoadDefaultGraphics#_00E310")
-		//a.JSL(fastRomBank | 0x00_E310)
-		//a.Comment("InitializeTilesets#_00E1DB")
-		//a.JSL(fastRomBank | 0x00_E1DB)
-		//a.LDY_imm8_b(0x5D)
-		//a.Comment("DecompressAnimatedUnderworldTiles#_00D377")
-		//a.JSL(fastRomBank | 0x00_D377)
 
 		a.Comment("Intro_CreateTextPointers#_028022")
 		a.JSL(fastRomBank | alttp.Intro_CreateTextPointers)
@@ -1417,12 +1460,12 @@ func setupAlttp(e *System) {
 		a.LDA_imm8_b(0x02)
 		a.STA_long(0x7EF3C5)
 
-		a.Comment("no bed cutscene")
-		a.LDA_imm8_b(0x10)
-		a.STA_long(0x7EF3C6)
+		// a.Comment("no bed cutscene")
+		// a.LDA_imm8_b(0x10)
+		// a.STA_long(0x7EF3C6)
 
 		// non-zero mirroring to skip message prompt on file load:
-		a.STA_long(0x7EC011)
+		// a.STA_long(0x7EC011)
 
 		// STOP:
 		a.STP()
@@ -1463,15 +1506,6 @@ func setupAlttp(e *System) {
 		a.Comment("LoadUnderworldSupertile")
 		a.JSL(b02LoadUnderworldSupertilePC)
 		a.STZ_dp(0x11)
-
-		//a.Comment("check module=7, submodule!=f:")
-		//a.LDA_dp(0x10)
-		//a.CMP_imm8_b(0x07)
-		//a.BNE("done")
-		//a.LDA_dp(0x11)
-		//a.BEQ("done")
-		//a.Comment("clear submodule to avoid spotlight:")
-		//a.STZ_dp(0x11)
 
 		a.Label("updateVRAM")
 		// this code sets up the DMA transfer parameters for animated BG tiles:
@@ -1681,6 +1715,13 @@ func setupAlttp(e *System) {
 		// patch out LoadSongBank#_008888
 		a = newEmitterAt(e, fastRomBank|alttp.Patch_LoadSongBank, true)
 		a.RTS()
+		a.WriteTextTo(e.Logger)
+	}
+
+	{
+		// patch out Sprite_ShowMessageUnconditional#_05E219 to prevent messages from interrupting us:
+		a = newEmitterAt(e, fastRomBank|alttp.Sprite_ShowMessageUnconditional, true)
+		a.RTL()
 		a.WriteTextTo(e.Logger)
 	}
 

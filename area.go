@@ -346,6 +346,10 @@ func (a *Area) Render() {
 }
 
 func (a *Area) DrawOverlays() {
+	if !drawOverlays {
+		return
+	}
+
 	greenTint := image.NewUniform(color.NRGBA{255, 255, 0, 64})
 	redTint := image.NewUniform(color.NRGBA{255, 0, 0, 96})
 	// cyanTint := image.NewUniform(color.NRGBA{0, 255, 255, 64})
